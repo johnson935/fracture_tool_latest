@@ -1,0 +1,1028 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Apr  3 23:54:12 2019
+
+@author: user
+"""
+
+from abaqus import *
+from abaqusConstants import *
+import section
+import regionToolset
+import displayGroupMdbToolset as dgm
+import part
+import material
+import assembly
+import step
+import interaction
+import load
+import mesh
+import optimization
+import job
+import sketch
+import visualization
+import xyPlot
+import displayGroupOdbToolset as dgo
+import connectorBehavior
+import numpy as np
+import math
+import time
+from collections import Counter
+    
+def fEDC(part, model, xaxis, yaxis, zaxis, N, g0, g90, singlePlane, multiPlane, mat, cusMat, *args, **kwargs):
+    
+    p = mdb.models[model].parts[part]
+
+    # timing script
+    t1 = time.time()
+    # creating plane
+    area2 = {}
+    U = {}
+    pos = {}
+    fileNumber = 1
+    axis = []
+    plotU = []
+    x = []
+    y = []
+    z = []
+    nodeSet = p.nodes
+    elementSet = p.elements
+    
+    #setting material properties
+    if mat == 'T800s/M21' and cusMat == False:
+        G90 = 0.255
+        G0 = 209
+    elif mat == 'T300/913' and cusMat == False:
+        G90 = 0.211
+        G0 = 133
+    elif mat == 'T300/920' and cusMat == False:
+        G90 = 0.456
+        G0 = 132
+    elif cusMat == True:
+        G90 = g90
+        G0 = g0
+    print(multiPlane)
+    if multiPlane == True:
+        for n in range(0,len(nodeSet)):
+            x.append( nodeSet[n].coordinates[0])
+            y.append(nodeSet[n].coordinates[1])
+            z.append(nodeSet[n].coordinates[2])
+    
+        #finding maximum and minimum coordinates of the model
+        minX = min(x)
+        minY = min(y)
+        minZ = min(z)
+        maxX = max(x)
+        maxY = max(y)
+        maxZ = max(z)
+        
+        if xaxis == True:
+            start = minX
+            end = maxX
+        elif yaxis == True:
+            start = minY
+            end = maxY
+        elif zaxis == True: 
+            start = minZ
+            end = maxZ
+        
+        for z in np.arange(start,end,abs(start-end)/N):
+            if xaxis == True:
+                s = np.array([z,0,0])
+                q = np.array([z,0,1])
+                r = np.array([z,1,0])
+                ax = 'x'
+            elif yaxis == True:
+                s = np.array([0,z,0])
+                q = np.array([0,z,1])
+                r = np.array([1,z,0])
+                ax = 'y'
+            elif zaxis == True:
+                s = np.array([0,z,0])
+                q = np.array([0,z,1])
+                r = np.array([1,z,0])
+                ax = 'z'
+            lambRecord = []
+        
+            p.DatumPlaneByThreePoints(point1=s, 
+                point2=q, 
+                point3=r) 
+            
+            pq = q - s
+            pr = r - s
+            
+            perp = np.cross(pq,pr)
+            d = -np.dot(perp,-s)
+            #select elements
+            vec = np.zeros((12,3))
+            vertexply = np.zeros((8,3))
+            vertexplyi = np.zeros((12,3))
+            vertexplyj = np.zeros((12,3))
+            vertexsubply = np.zeros((8,3))
+            #finding area of intercepts in the general case of any plane interception on the element
+            for e in range(0,len(elementSet)):
+        #        if e == 3:
+                connected = []
+                    
+                connected = elementSet[e].connectivity
+                label = elementSet[e].label
+                area2[label] = []
+                    # sort node index to keep track of lines and vertex
+                sort = np.sort(connected)
+                side1 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[1]].coordinates)
+                side2 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[2]].coordinates)
+                side3 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[4]].coordinates)
+                size = [np.linalg.norm(side1)]
+                size.append(np.linalg.norm(side2))
+                size.append(np.linalg.norm(side3))
+                maxSize = max(size)
+                diag = math.sqrt(maxSize**2+maxSize**2)
+                # calculate the elements near the plane taking account element mesh size
+                if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
+                    region = []
+                    nLayups = len(p.compositeLayups.keys())
+                    # number of layups
+                    for n in range(0,nLayups):
+                        key = p.compositeLayups.keys()[n]
+                        nPlies = len(p.compositeLayups[key].plies)
+                        #ply stack direction
+                        stackAxis = p.compositeLayups[key].orientation.stackDirection
+                        plyThickness = []
+                        # calculate of the total relative thickness of plies add to one otherwise 
+                        #terminate the program
+                        for j in range(0,nPlies):
+                            plyThickness.append(p.compositeLayups[key].plies[j].thickness)
+                            region.append(p.compositeLayups[key].plies[j].region[0])
+                        if sum(plyThickness) != 1 and region != [region[0]] * nPlies:
+                            sys.exit('Defined relative thiknesses do not add up to one and/or regions defined for compositelayup are different')
+                        plyRelThickness = 0  
+                        # Three possible directions for the ply stack
+                        # Vertex change depending on stack direction
+                        if str(stackAxis) == 'STACK_1':
+                            if np.array(nodeSet[sort[4]].coordinates)[0] < np.array(nodeSet[sort[0]].coordinates)[0]:
+                                vertexsubply[0,:] = np.array(nodeSet[sort[4]].coordinates)
+                                vertexsubply[1,:] = np.array(nodeSet[sort[5]].coordinates)
+                                vertexsubply[2,:] = np.array(nodeSet[sort[6]].coordinates)
+                                vertexsubply[3,:] = np.array(nodeSet[sort[7]].coordinates)
+                            
+                                vertexsubply[4,:] = np.array(nodeSet[sort[0]].coordinates)
+                                vertexsubply[5,:] = np.array(nodeSet[sort[1]].coordinates)
+                                vertexsubply[6,:] = np.array(nodeSet[sort[2]].coordinates)
+                                vertexsubply[7,:] = np.array(nodeSet[sort[3]].coordinates)
+                            else:
+                                vertexsubply[4,:] = np.array(nodeSet[sort[4]].coordinates)
+                                vertexsubply[5,:] = np.array(nodeSet[sort[5]].coordinates)
+                                vertexsubply[6,:] = np.array(nodeSet[sort[6]].coordinates)
+                                vertexsubply[7,:] = np.array(nodeSet[sort[7]].coordinates)
+                            
+                                vertexsubply[0,:] = np.array(nodeSet[sort[0]].coordinates)
+                                vertexsubply[1,:] = np.array(nodeSet[sort[1]].coordinates)
+                                vertexsubply[2,:] = np.array(nodeSet[sort[2]].coordinates)
+                                vertexsubply[3,:] = np.array(nodeSet[sort[3]].coordinates)
+                        elif str(stackAxis) == 'STACK_2':
+                            if np.array(nodeSet[sort[1]].coordinates)[1] < np.array(nodeSet[sort[0]].coordinates)[1]:
+                                vertexsubply[0,:] = np.array(nodeSet[sort[1]].coordinates)
+                                vertexsubply[1,:] = np.array(nodeSet[sort[3]].coordinates)
+                                vertexsubply[2,:] = np.array(nodeSet[sort[5]].coordinates)
+                                vertexsubply[3,:] = np.array(nodeSet[sort[7]].coordinates)
+                                
+                                vertexsubply[4,:] = np.array(nodeSet[sort[0]].coordinates)
+                                vertexsubply[5,:] = np.array(nodeSet[sort[2]].coordinates)
+                                vertexsubply[6,:] = np.array(nodeSet[sort[4]].coordinates)
+                                vertexsubply[7,:] = np.array(nodeSet[sort[6]].coordinates)
+                            else:
+                                vertexsubply[4,:] = np.array(nodeSet[sort[1]].coordinates)
+                                vertexsubply[5,:] = np.array(nodeSet[sort[3]].coordinates)
+                                vertexsubply[6,:] = np.array(nodeSet[sort[5]].coordinates)
+                                vertexsubply[7,:] = np.array(nodeSet[sort[7]].coordinates)
+                                
+                                vertexsubply[0,:] = np.array(nodeSet[sort[0]].coordinates)
+                                vertexsubply[1,:] = np.array(nodeSet[sort[2]].coordinates)
+                                vertexsubply[2,:] = np.array(nodeSet[sort[4]].coordinates)
+                                vertexsubply[3,:] = np.array(nodeSet[sort[6]].coordinates)
+                        elif str(stackAxis) == 'STACK_3':
+                            if np.array(nodeSet[sort[2]].coordinates)[2] < np.array(nodeSet[sort[0]].coordinates)[2]:
+                                vertexsubply[0,:] = np.array(nodeSet[sort[2]].coordinates)
+                                vertexsubply[1,:] = np.array(nodeSet[sort[3]].coordinates)
+                                vertexsubply[2,:] = np.array(nodeSet[sort[6]].coordinates)
+                                vertexsubply[3,:] = np.array(nodeSet[sort[7]].coordinates)
+                                
+                                vertexsubply[4,:] = np.array(nodeSet[sort[0]].coordinates)
+                                vertexsubply[5,:] = np.array(nodeSet[sort[1]].coordinates)
+                                vertexsubply[6,:] = np.array(nodeSet[sort[4]].coordinates)
+                                vertexsubply[7,:] = np.array(nodeSet[sort[5]].coordinates)
+                            
+                            else:
+                                vertexsubply[4,:] = np.array(nodeSet[sort[2]].coordinates)
+                                vertexsubply[5,:] = np.array(nodeSet[sort[3]].coordinates)
+                                vertexsubply[6,:] = np.array(nodeSet[sort[6]].coordinates)
+                                vertexsubply[7,:] = np.array(nodeSet[sort[7]].coordinates)
+                                
+                                vertexsubply[0,:] = np.array(nodeSet[sort[0]].coordinates)
+                                vertexsubply[1,:] = np.array(nodeSet[sort[1]].coordinates)
+                                vertexsubply[2,:] = np.array(nodeSet[sort[4]].coordinates)
+                                vertexsubply[3,:] = np.array(nodeSet[sort[5]].coordinates)
+                       # assign vertex to different variable for further calculation
+                        for i in range(0,4):     
+                                vertexply[i,:] = vertexsubply[i,:]
+                        for j in range(0,nPlies):
+                            plyRelThickness += p.compositeLayups[key].plies[j].thickness
+                            lamb = []
+                            
+                            #assign ply coordinates according to ply thickness using equation of a line 
+                            for i in range(0,4):
+                                vertexply[i+4,:] = vertexsubply[i,:] + plyRelThickness * (vertexsubply[i+4,:] - vertexsubply[i,:])
+                                vertexplyi[i,:] = vertexply[i,:]
+                                vertexplyj[i,:] = vertexply[i+4,:]
+                                
+                            vertexplyi[4,:] = vertexply[0,:] 
+                            vertexplyj[4,:] = vertexply[1,:]
+                            
+                            vertexplyi[5,:] = vertexply[3,:]
+                            vertexplyj[5,:] = vertexply[1,:]
+                            
+                            vertexplyi[6,:] = vertexply[2,:]
+                            vertexplyj[6,:] = vertexply[0,:]
+                            
+                            vertexplyi[7,:] = vertexply[2,:] 
+                            vertexplyj[7,:] = vertexply[3,:] 
+                            
+                            vertexplyi[8,:] = vertexply[4,:]
+                            vertexplyj[8,:] = vertexply[5,:]
+                            
+                            vertexplyi[9,:] = vertexply[7,:]
+                            vertexplyj[9,:] = vertexply[5,:]
+                            
+                            vertexplyi[10,:] = vertexply[6,:]
+                            vertexplyj[10,:] = vertexply[4,:]
+                            
+                            vertexplyi[11,:] = vertexply[6,:]
+                            vertexplyj[11,:] = vertexply[7,:]
+                            
+            #                # Algorithm for lines and finding lambda (gradient of intercept)
+            #                # refer to paper
+                            
+                            for i in range(0,len(vec)):
+                                vec[i,:] = vertexplyi[i,:] - vertexplyj[i,:]
+                                if np.dot(perp, vec[i,:]) != 0:
+                                    lamb.append((d - np.dot(perp, vertexplyj[i,:]))/(np.dot(perp, vec[i,:]))) 
+                                else:
+                                    lamb.append(-1)
+                            k = 0  
+                            intercept = np.zeros((8,3))
+                            count = Counter(lamb)
+            #                print(vec, vertexplyj)
+            #                print(vertexplyi)
+            #                print(lamb)
+                            # checking for every value of lambda if there is an intercept
+                            for i in range(0,len(lamb)):
+                                if lamb[i] <= 1 and lamb[i] > 0:
+                                    #if there is an intercept find the coordinates using parametric method
+                                    temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
+                                    intercept[k,:] = temp
+                                    #if lambda = 1 check if there are over lapping intersections
+                                    if lamb[i] == 1:
+                                        for j in range(0,len(intercept)):
+                                            if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
+                                                k -= 1
+                                    k += 1
+                                # check if intersection is at the nodes and if the itersections lie
+                                # diagonally directly at the nodes so we have lambda = 1 and 0 
+                                # the same number of times
+                                elif lamb[i] == 0 and count[0] == count[1]:
+                                    temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
+                                    intercept[k,:] = temp
+                                    if lamb[i] == 0:
+                                        for j in range(0,len(intercept)):
+                                            if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
+                                                k -= 1
+                                    k += 1
+                                    
+                                if lamb[i] <=1 and lamb[i] >= 0:
+                                    lambRecord.append(lamb[i])
+            #                print(intercept)
+                            #find the areas by sorting the coordinates of intersections
+                            norm = 0
+                            angles = {}
+            
+            #                        print(lamb)
+                            #for just three points of intersection find area of triangle
+                            if k == 3:
+                                pq = intercept[0,:] - intercept[1,:]
+                                pr = intercept[0,:] - intercept[2,:]
+                                cros = np.cross(pq,pr)
+                                norm += np.linalg.norm(cros)/2
+                                area2[label].append(norm)
+                            #things become harder with more than 3 points
+                            elif k  >= 4:
+                                #define reference vector
+                                ref = intercept[0,:] - intercept[1,:]
+                                #set the reference angle of the reference vector to zero
+                                angles[1] = 0
+                                for i in range(2,k):
+                                    #find all other vectors with respect to the first point
+                                    #find their angles with respect to the reference angle
+                                    #then arrange from smallest to largest angle
+                                    ref2 = intercept[0,:] - intercept[i,:]
+                                    cros = np.cross(ref,ref2)
+                                    refNorm = np.linalg.norm(cros)
+                                    product = np.linalg.norm(ref)*np.linalg.norm(ref2)
+                                    dot = np.dot(ref,ref2)
+                                    #if statement added as to test which side the point lies
+                                    #on reference vector. If the z componenet of the cross
+                                    #product of the reference vector and the new vector
+                                    #is negative then the point lies on one side, if positive
+                                    #point lies on other side
+                                    if cros[2] < 0:
+                                        sin = -refNorm/product
+                                    else:
+                                        sin = refNorm/product
+                                    cos = dot/product
+                                    #between 0 and 90
+                                    if sin >= 0 and cos >= 0:
+                                        theta = (180*math.acos(cos))/math.pi
+                                        angles[i] = theta
+                                    #between -90 and 0
+                                    elif sin <= 0 and cos >= 0:
+                                        theta = (180*math.asin(sin))/math.pi
+                                        angles[i] = theta
+                                    #between 90 and 180
+                                    elif sin >= 0 and cos <= 0:
+                                        theta = 180-((180*math.asin(sin))/math.pi)
+                                        angles[i] = theta
+                                    #between -180 and -90 
+                                    elif sin <= 0 and cos <= 0:
+                                        theta = -180 + ((180*math.asin(sin))/math.pi)
+                                        angles[i] = theta
+                                sorted_angles = sorted(angles.items(), key=lambda x: x[1])
+                                sorted_index = np.array(sorted_angles)[:,0]
+                                for i in range(0,len(sorted_index)-1):
+                                    pq = intercept[0,:] - intercept[sorted_index[i],:]
+                                    pr = intercept[0,:] - intercept[sorted_index[i+1],:]
+                                    cros = np.cross(pq,pr)
+                                    norm += np.linalg.norm(cros)/2
+                                area2[label].append(norm)
+                            else:
+                                area2[label].append(0)
+                            
+                            #assign coordinates of last four vertex to first four vertex
+                            #in order to calcualte area of the new ply
+                            for i in range(0,4):
+                                vertexply[i,:] = vertexply[i+4,:]
+                           #5.7 seconds when added to only consider elements near the plane and 28.4 seconds without modifycation 
+            if lambRecord[0:] == [1] * len(lambRecord) or lambRecord[0:] == [0] * len(lambRecord):
+                        area2 = {}
+            for label in area2.keys():
+                if area2[label] == [0] * nPlies or area2[label] == []:
+                    del area2[label]
+            #    print(vertexsubply)        
+            #    print('Area calculated from intersecting planes: {0}'.format(area2))
+                #print('Area calculated for special case where plane intersected nodes: {0}'.format(area))
+        
+    
+            if area2 != {}:
+            # extracting material orientation
+                Name = 'csys-plane'
+                if Name in p.features.keys():
+                    del p.features[Name]
+                #creating coordinate system for plane
+                p.DatumCsysByThreePoints( origin = s, name = Name,coordSysType = CARTESIAN,point1 = q, point2 = s + perp)
+               #extracting coordinate axis
+                planeAxis1 = p.datums[p.features[Name].id].axis1
+                planeAxis2 = p.datums[p.features[Name].id].axis2
+                planeAxis3 = p.datums[p.features[Name].id].axis3
+                
+                
+            
+        #        Rx = np.zeros((3,3))
+                Ry = np.zeros((3,3))
+                Rz = np.zeros((3,3))
+                materialAngle = {}
+                #for each defined ply layup
+                for i in range(0,nLayups):
+                    key = p.compositeLayups.keys()[i]
+                    sys = p.compositeLayups[key].orientation.localCsys
+                    refAxis = str(p.compositeLayups[key].orientation.axis)
+                    addAngle = p.compositeLayups[key].orientation.angle
+                    #extract layup axis
+                    plyaxis1 = p.datums[sys].axis1
+        #            plyaxis2 = p.datums[sys].axis2
+        #            plyaxis3 = p.datums[sys].axis3
+                    #for every ply
+                    
+                    for j in range(0,nPlies):
+                        plyOrientation = p.compositeLayups[key].plies[j].orientation
+                        plyAngle = p.compositeLayups[key].plies[j].orientationValue
+                        plyOrient = str(p.compositeLayups[key].plies[j].axis)
+                        plyOrientType = str(p.compositeLayups[key].plies[j].orientationType)
+                        
+                        #if no material orientation is defined for each individual py then 
+                        #orientatio will be that of the layup
+                        if plyOrientation == None:
+                            direction1 = plyaxis1.direction
+        #                    direction2 = plyaxis2.direction
+        #                    direction3 = plyaxis3.direction
+                            totalAngle = addAngle + plyAngle
+                            
+                            if plyOrientType == 'ANGLE_45':
+                                totalAngle = addAngle + 45
+                            elif plyOrientType == 'ANGLE_90':
+                                totalAngle = addAngle + 90
+                            elif plyOrientType == 'ANGLLE_NEG45':
+                                totalAngle = addAngle - 45
+                                
+                                
+                            if totalAngle != 0: 
+        #                        if refAxis == 'AXIS_1':
+        #                    #rotation wrt x axis
+        #                            Rx = np.array([[1,0,0],[0,math.cos(totalAngle*math.pi/180),math.sin(totalAngle*math.pi/180)],[0,-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180)]])
+        #                            direction2 = np.dot(Rx,plyaxis2.direction)
+        #                            direction3 = np.dot(Rx,plyaxis3.direction)
+                                   
+                                if refAxis == 'AXIS_2':
+                                    Ry = np.array([[math.cos(totalAngle*math.pi/180),0,-math.sin(totalAngle*math.pi/180)],[0,1,0],[math.sin(totalAngle*math.pi/180),0,math.cos(45*math.pi/180)]])
+                                    direction1 = np.dot(Ry,plyaxis1.direction)
+        #                            direction3 = np.dot(Ry,plyaxis3.direction)
+                               
+                                elif refAxis == 'AXIS_3':
+                                    Rz = np.array([[math.cos(totalAngle*math.pi/180),-math.sin(totalAngle*math.pi/180),0],[-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180),0],[0,0,1]])
+                                    direction1 = np.dot(Rz,plyaxis1.direction)
+        #                            direction2 = np.dot(Rz,plyaxis2.direction)
+                        else:
+                            #if there is a defines Csys for each ply then change the axis defined
+                            plyaxis1 = p.datums[plyOrientation].axis1
+        #                    plyaxis2 = p.datums[plyOrientation].axis2
+        #                    plyaxis3 = p.datums[plyOrientation].axis3
+                        
+                            direction1 = plyaxis1.direction
+        #                    direction2 = plyaxis2.direction
+        #                    direction3 = plyaxis3.direction
+            #               
+                            totalAngle = plyAngle
+                            if plyOrientType == 'ANGLE_45':
+                                totalAngle = 45
+                            elif plyOrientType == 'ANGLE_90':
+                                totalAngle = 90
+                            elif plyOrientType == 'ANGLLE_NEG45':
+                                totalAngle = -45
+                                
+        #                    if plyOrient == 'AXIS_1':
+        #                    #rotation wrt x axis
+        #                        Rx = np.array([[1,0,0],[0,math.cos(totalAngle*math.pi/180),math.sin(totalAngle*math.pi/180)],[0,-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180)]])
+        #                        direction2 = np.dot(Rx,plyaxis2.direction)
+        #                        direction3 = np.dot(Rx,plyaxis3.direction)
+                               
+                            elif plyOrient == 'AXIS_2':
+                                Ry = np.array([[math.cos(totalAngle*math.pi/180),0,-math.sin(totalAngle*math.pi/180)],[0,1,0],[math.sin(totalAngle*math.pi/180),0,math.cos(45*math.pi/180)]])
+                                direction1 = np.dot(Ry,plyaxis1.direction)
+        #                        direction3 = np.dot(Ry,plyaxis3.direction)
+                                
+                            elif plyOrient == 'AXIS_3':
+                                Rz = np.array([[math.cos(totalAngle*math.pi/180),-math.sin(totalAngle*math.pi/180),0],[-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180),0],[0,0,1]])
+                                direction1 = np.dot(Rz,plyaxis1.direction)
+        #                        direction2 = np.dot(Rz,plyaxis2.direction)
+            
+            #            
+                        #finding angle between direction of plane axis and fibre axis    
+                        
+        #                dotx = np.dot(direction1,planeAxis1.direction)
+                        doty = np.dot(direction1,planeAxis2.direction)
+        #                dotz = np.dot(direction1,planeAxis3.direction)
+        #                productx = np.linalg.norm(direction1)*np.linalg.norm(planeAxis1.direction)
+                        producty = np.linalg.norm(direction1)*np.linalg.norm(planeAxis2.direction)
+        
+        
+                        cosy = doty/producty
+        
+                        
+                        theta = 180*math.acos(cosy)/math.pi
+                        
+        
+                        if theta > 90:
+                            theta = 180 - theta
+                                
+                        #assigning angles to elements
+                        plyRegion = p.compositeLayups[key].plies[j].region[0]
+                        plyElements = p.sets[plyRegion].elements
+                        for k in range(0,len(plyElements)):
+                            label = plyElements[k].label
+                            if label in area2.keys() and label in materialAngle.keys(): #check if another ply is assigned to the same element
+                                materialAngle[label].append(theta) #append to the orientation angle of the element
+                                    #assume plys have same relative thickness
+                            elif label in area2.keys():
+                                materialAngle[label] = [theta]
+                                    #if only one ply is assigned to the element
+                
+            
+        #        print('Angle output for each element with respect to x, y and z axis of cut plane: {0}'.format(materialAngle))
+                
+                #calculating toughness of composite in relation to fibre orientation
+                #Then storing the toughness of composite in a database if existing 
+                #orientation already exist
+                materialG = {}
+                totalU = 0
+                axis.append(z)
+                for element in area2.keys():
+                    theta = materialAngle[element]
+                    #writing  and reading to database
+                    materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))
+          
+                    #calculate energy dissipation
+                    
+                    totalU += np.dot(materialG[element],area2[element])
+                        
+                if  totalU not in U.keys():  
+                    U[totalU] = [p.features.keys()[-2]]
+                    pos[totalU] = [z]
+                else:
+                    U[totalU].append(p.features.keys()[-2])
+                    pos[totalU].append(z)
+                print('Total energy dissipated from failure: {0} at {1} = {2}'.format(float(totalU),ax,z))
+                plotU.append(totalU)
+        critU = min(U.keys())
+        planes = U[critU]
+        critPos = pos[critU]      
+        print('Critical energy is: {0}kJ at the following planes: {1}, at {2} = {3}'.format(critU,planes,ax,critPos))
+        t2 = time.time()
+        print('Run time: {0}'.format(t2-t1))
+        
+        #plotting output energies with increasing co-ordinates
+        #getting existing xyplots
+        outputFiles = session.xyPlots.keys()
+        fileName = 'Energy Output{0}'.format(fileNumber)
+        while fileName in outputFiles:
+            fileNumber += 1
+            fileName = 'Energy Output{0}'.format(fileNumber)
+        #creating new data plot
+        xyp = session.XYPlot('Energy Output{0}'.format(fileNumber))
+        #creating new chart
+        chartName = xyp.charts.keys()[0]
+        chart = xyp.charts[chartName]
+        #x and y label
+        if xaxis == True:
+            xQuantity = visualization.QuantityType(type=PATH_X)
+        elif yaxis == True:
+            xQuantity = visualization.QuantityType(type=PATH_Y)
+        elif zaxis == True:
+            xQuantity = visualization.QuantityType(type=PATH_Z)
+        yQuantity = visualization.QuantityType(type=ENERGY)
+        c = np.empty((len(axis),2))
+        c[:,0] = axis
+        c[:,1] = plotU
+        #creating data plot
+        xy2 = xyPlot.XYData(data=(c), sourceDescription='Entered from keyboard', 
+            axis1QuantityType=xQuantity, axis2QuantityType=yQuantity, )
+        #creating curve
+        c2 = session.Curve(xyData=xy2)
+        #plotting curve
+        chart.setValues(curvesToPlot=(c2, ), )
+        #changing view to graph
+        session.viewports['Viewport: 1'].setValues(displayedObject=xyp)
+    
+    
+    
+    if singlePlane == True:
+        area2 = {}
+        coord1 = kwargs.get('coord1')
+        coord2 = kwargs.get('coord2')
+        coord3 = kwargs.get('coord3')
+        s = np.array(coord1.coordinates)
+        q = np.array(coord2.coordinates)
+        r = np.array(coord3.coordinates)
+#        if np.equal(s, q) or np.equal(s, r) or np.equal(q,r):
+#            sys.exit('same coordinates picked')
+            
+        lambRecord = []
+            
+        p.DatumPlaneByThreePoints(point1=s, 
+            point2=q, 
+            point3=r) 
+        
+        pq = q - s
+        pr = r - s
+        
+        perp = np.cross(pq,pr)
+        d = -np.dot(perp,-s)
+        #select elements
+        vec = np.zeros((12,3))
+        vertexply = np.zeros((8,3))
+        vertexplyi = np.zeros((12,3))
+        vertexplyj = np.zeros((12,3))
+        vertexsubply = np.zeros((8,3))
+        #finding area of intercepts in the general case of any plane interception on the element
+        for e in range(0,len(elementSet)):
+    #        if e == 3:
+            connected = []
+                
+            connected = elementSet[e].connectivity
+            label = elementSet[e].label
+            area2[label] = []
+                # sort node index to keep track of lines and vertex
+            sort = np.sort(connected)
+            side1 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[1]].coordinates)
+            side2 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[2]].coordinates)
+            side3 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[4]].coordinates)
+            size = [np.linalg.norm(side1)]
+            size.append(np.linalg.norm(side2))
+            size.append(np.linalg.norm(side3))
+            maxSize = max(size)
+            diag = math.sqrt(maxSize**2+maxSize**2)
+            # calculate the elements near the plane taking account element mesh size
+            if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
+                region = []
+                nLayups = len(p.compositeLayups.keys())
+                # number of layups
+                for n in range(0,nLayups):
+                    key = p.compositeLayups.keys()[n]
+                    nPlies = len(p.compositeLayups[key].plies)
+                    #ply stack direction
+                    stackAxis = p.compositeLayups[key].orientation.stackDirection
+                    plyThickness = []
+                    # calculate of the total relative thickness of plies add to one otherwise 
+                    #terminate the program
+                    for j in range(0,nPlies):
+                        plyThickness.append(p.compositeLayups[key].plies[j].thickness)
+                        region.append(p.compositeLayups[key].plies[j].region[0])
+                    if sum(plyThickness) != 1 and region != [region[0]] * nPlies:
+                        sys.exit('Defined relative thiknesses do not add up to one and/or regions defined for compositelayup are different')
+                    plyRelThickness = 0  
+                    # Three possible directions for the ply stack
+                    # Vertex change depending on stack direction
+                    if str(stackAxis) == 'STACK_1':
+                        if np.array(nodeSet[sort[4]].coordinates)[0] < np.array(nodeSet[sort[0]].coordinates)[0]:
+                            vertexsubply[0,:] = np.array(nodeSet[sort[4]].coordinates)
+                            vertexsubply[1,:] = np.array(nodeSet[sort[5]].coordinates)
+                            vertexsubply[2,:] = np.array(nodeSet[sort[6]].coordinates)
+                            vertexsubply[3,:] = np.array(nodeSet[sort[7]].coordinates)
+                        
+                            vertexsubply[4,:] = np.array(nodeSet[sort[0]].coordinates)
+                            vertexsubply[5,:] = np.array(nodeSet[sort[1]].coordinates)
+                            vertexsubply[6,:] = np.array(nodeSet[sort[2]].coordinates)
+                            vertexsubply[7,:] = np.array(nodeSet[sort[3]].coordinates)
+                        else:
+                            vertexsubply[4,:] = np.array(nodeSet[sort[4]].coordinates)
+                            vertexsubply[5,:] = np.array(nodeSet[sort[5]].coordinates)
+                            vertexsubply[6,:] = np.array(nodeSet[sort[6]].coordinates)
+                            vertexsubply[7,:] = np.array(nodeSet[sort[7]].coordinates)
+                        
+                            vertexsubply[0,:] = np.array(nodeSet[sort[0]].coordinates)
+                            vertexsubply[1,:] = np.array(nodeSet[sort[1]].coordinates)
+                            vertexsubply[2,:] = np.array(nodeSet[sort[2]].coordinates)
+                            vertexsubply[3,:] = np.array(nodeSet[sort[3]].coordinates)
+                    elif str(stackAxis) == 'STACK_2':
+                        if np.array(nodeSet[sort[1]].coordinates)[1] < np.array(nodeSet[sort[0]].coordinates)[1]:
+                            vertexsubply[0,:] = np.array(nodeSet[sort[1]].coordinates)
+                            vertexsubply[1,:] = np.array(nodeSet[sort[3]].coordinates)
+                            vertexsubply[2,:] = np.array(nodeSet[sort[5]].coordinates)
+                            vertexsubply[3,:] = np.array(nodeSet[sort[7]].coordinates)
+                            
+                            vertexsubply[4,:] = np.array(nodeSet[sort[0]].coordinates)
+                            vertexsubply[5,:] = np.array(nodeSet[sort[2]].coordinates)
+                            vertexsubply[6,:] = np.array(nodeSet[sort[4]].coordinates)
+                            vertexsubply[7,:] = np.array(nodeSet[sort[6]].coordinates)
+                        else:
+                            vertexsubply[4,:] = np.array(nodeSet[sort[1]].coordinates)
+                            vertexsubply[5,:] = np.array(nodeSet[sort[3]].coordinates)
+                            vertexsubply[6,:] = np.array(nodeSet[sort[5]].coordinates)
+                            vertexsubply[7,:] = np.array(nodeSet[sort[7]].coordinates)
+                            
+                            vertexsubply[0,:] = np.array(nodeSet[sort[0]].coordinates)
+                            vertexsubply[1,:] = np.array(nodeSet[sort[2]].coordinates)
+                            vertexsubply[2,:] = np.array(nodeSet[sort[4]].coordinates)
+                            vertexsubply[3,:] = np.array(nodeSet[sort[6]].coordinates)
+                    elif str(stackAxis) == 'STACK_3':
+                        if np.array(nodeSet[sort[2]].coordinates)[2] < np.array(nodeSet[sort[0]].coordinates)[2]:
+                            vertexsubply[0,:] = np.array(nodeSet[sort[2]].coordinates)
+                            vertexsubply[1,:] = np.array(nodeSet[sort[3]].coordinates)
+                            vertexsubply[2,:] = np.array(nodeSet[sort[6]].coordinates)
+                            vertexsubply[3,:] = np.array(nodeSet[sort[7]].coordinates)
+                            
+                            vertexsubply[4,:] = np.array(nodeSet[sort[0]].coordinates)
+                            vertexsubply[5,:] = np.array(nodeSet[sort[1]].coordinates)
+                            vertexsubply[6,:] = np.array(nodeSet[sort[4]].coordinates)
+                            vertexsubply[7,:] = np.array(nodeSet[sort[5]].coordinates)
+                        
+                        else:
+                            vertexsubply[4,:] = np.array(nodeSet[sort[2]].coordinates)
+                            vertexsubply[5,:] = np.array(nodeSet[sort[3]].coordinates)
+                            vertexsubply[6,:] = np.array(nodeSet[sort[6]].coordinates)
+                            vertexsubply[7,:] = np.array(nodeSet[sort[7]].coordinates)
+                            
+                            vertexsubply[0,:] = np.array(nodeSet[sort[0]].coordinates)
+                            vertexsubply[1,:] = np.array(nodeSet[sort[1]].coordinates)
+                            vertexsubply[2,:] = np.array(nodeSet[sort[4]].coordinates)
+                            vertexsubply[3,:] = np.array(nodeSet[sort[5]].coordinates)
+                   # assign vertex to different variable for further calculation
+                    for i in range(0,4):     
+                            vertexply[i,:] = vertexsubply[i,:]
+                    for j in range(0,nPlies):
+                        plyRelThickness += p.compositeLayups[key].plies[j].thickness
+                        lamb = []
+                        
+                        #assign ply coordinates according to ply thickness using equation of a line 
+                        for i in range(0,4):
+                            vertexply[i+4,:] = vertexsubply[i,:] + plyRelThickness * (vertexsubply[i+4,:] - vertexsubply[i,:])
+                            vertexplyi[i,:] = vertexply[i,:]
+                            vertexplyj[i,:] = vertexply[i+4,:]
+                            
+                        vertexplyi[4,:] = vertexply[0,:] 
+                        vertexplyj[4,:] = vertexply[1,:]
+                        
+                        vertexplyi[5,:] = vertexply[3,:]
+                        vertexplyj[5,:] = vertexply[1,:]
+                        
+                        vertexplyi[6,:] = vertexply[2,:]
+                        vertexplyj[6,:] = vertexply[0,:]
+                        
+                        vertexplyi[7,:] = vertexply[2,:] 
+                        vertexplyj[7,:] = vertexply[3,:] 
+                        
+                        vertexplyi[8,:] = vertexply[4,:]
+                        vertexplyj[8,:] = vertexply[5,:]
+                        
+                        vertexplyi[9,:] = vertexply[7,:]
+                        vertexplyj[9,:] = vertexply[5,:]
+                        
+                        vertexplyi[10,:] = vertexply[6,:]
+                        vertexplyj[10,:] = vertexply[4,:]
+                        
+                        vertexplyi[11,:] = vertexply[6,:]
+                        vertexplyj[11,:] = vertexply[7,:]
+                        
+        #                # Algorithm for lines and finding lambda (gradient of intercept)
+        #                # refer to paper
+                        
+                        for i in range(0,len(vec)):
+                            vec[i,:] = vertexplyi[i,:] - vertexplyj[i,:]
+                            if np.dot(perp, vec[i,:]) != 0:
+                                lamb.append((d - np.dot(perp, vertexplyj[i,:]))/(np.dot(perp, vec[i,:]))) 
+                            else:
+                                lamb.append(-1)
+                        k = 0  
+                        intercept = np.zeros((8,3))
+                        count = Counter(lamb)
+        #                print(vec, vertexplyj)
+        #                print(vertexplyi)
+        #                print(lamb)
+                        # checking for every value of lambda if there is an intercept
+                        for i in range(0,len(lamb)):
+                            if lamb[i] <= 1 and lamb[i] > 0:
+                                #if there is an intercept find the coordinates using parametric method
+                                temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
+                                intercept[k,:] = temp
+                                #if lambda = 1 check if there are over lapping intersections
+                                if lamb[i] == 1:
+                                    for j in range(0,len(intercept)):
+                                        if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
+                                            k -= 1
+                                k += 1
+                            # check if intersection is at the nodes and if the itersections lie
+                            # diagonally directly at the nodes so we have lambda = 1 and 0 
+                            # the same number of times
+                            elif lamb[i] == 0 and count[0] == count[1]:
+                                temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
+                                intercept[k,:] = temp
+                                if lamb[i] == 0:
+                                    for j in range(0,len(intercept)):
+                                        if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
+                                            k -= 1
+                                k += 1
+                                
+                            if lamb[i] <=1 and lamb[i] >= 0:
+                                lambRecord.append(lamb[i])
+        #                print(intercept)
+                        #find the areas by sorting the coordinates of intersections
+                        norm = 0
+                        angles = {}
+        
+        #                        print(lamb)
+                        #for just three points of intersection find area of triangle
+                        if k == 3:
+                            pq = intercept[0,:] - intercept[1,:]
+                            pr = intercept[0,:] - intercept[2,:]
+                            cros = np.cross(pq,pr)
+                            norm += np.linalg.norm(cros)/2
+                            area2[label].append(norm)
+                        #things become harder with more than 3 points
+                        elif k  >= 4:
+                            #define reference vector
+                            ref = intercept[0,:] - intercept[1,:]
+                            #set the reference angle of the reference vector to zero
+                            angles[1] = 0
+                            for i in range(2,k):
+                                #find all other vectors with respect to the first point
+                                #find their angles with respect to the reference angle
+                                #then arrange from smallest to largest angle
+                                ref2 = intercept[0,:] - intercept[i,:]
+                                cros = np.cross(ref,ref2)
+                                refNorm = np.linalg.norm(cros)
+                                product = np.linalg.norm(ref)*np.linalg.norm(ref2)
+                                dot = np.dot(ref,ref2)
+                                #if statement added as to test which side the point lies
+                                #on reference vector. If the z componenet of the cross
+                                #product of the reference vector and the new vector
+                                #is negative then the point lies on one side, if positive
+                                #point lies on other side
+                                if cros[2] < 0:
+                                    sin = -refNorm/product
+                                else:
+                                    sin = refNorm/product
+                                cos = dot/product
+                                #between 0 and 90
+                                if sin >= 0 and cos >= 0:
+                                    theta = (180*math.acos(cos))/math.pi
+                                    angles[i] = theta
+                                #between -90 and 0
+                                elif sin <= 0 and cos >= 0:
+                                    theta = (180*math.asin(sin))/math.pi
+                                    angles[i] = theta
+                                #between 90 and 180
+                                elif sin >= 0 and cos <= 0:
+                                    theta = 180-((180*math.asin(sin))/math.pi)
+                                    angles[i] = theta
+                                #between -180 and -90 
+                                elif sin <= 0 and cos <= 0:
+                                    theta = -180 + ((180*math.asin(sin))/math.pi)
+                                    angles[i] = theta
+                            sorted_angles = sorted(angles.items(), key=lambda x: x[1])
+                            sorted_index = np.array(sorted_angles)[:,0]
+                            for i in range(0,len(sorted_index)-1):
+                                pq = intercept[0,:] - intercept[sorted_index[i],:]
+                                pr = intercept[0,:] - intercept[sorted_index[i+1],:]
+                                cros = np.cross(pq,pr)
+                                norm += np.linalg.norm(cros)/2
+                            area2[label].append(norm)
+                        else:
+                            area2[label].append(0)
+                        
+                        #assign coordinates of last four vertex to first four vertex
+                        #in order to calcualte area of the new ply
+                        for i in range(0,4):
+                            vertexply[i,:] = vertexply[i+4,:]
+                       #5.7 seconds when added to only consider elements near the plane and 28.4 seconds without modifycation 
+        if lambRecord[0:] == [1] * len(lambRecord) or lambRecord[0:] == [0] * len(lambRecord):
+                    area2 = {}
+        for label in area2.keys():
+            if area2[label] == [0] * nPlies or area2[label] == []:
+                del area2[label]
+        #    print(vertexsubply)        
+        #    print('Area calculated from intersecting planes: {0}'.format(area2))
+            #print('Area calculated for special case where plane intersected nodes: {0}'.format(area))
+    
+
+        if area2 != {}:
+        # extracting material orientation
+            Name = 'csys-plane'
+            if Name in p.features.keys():
+                del p.features[Name]
+            #creating coordinate system for plane
+            p.DatumCsysByThreePoints( origin = s, name = Name,coordSysType = CARTESIAN,point1 = q, point2 = s + perp)
+           #extracting coordinate axis
+            planeAxis1 = p.datums[p.features[Name].id].axis1
+            planeAxis2 = p.datums[p.features[Name].id].axis2
+            planeAxis3 = p.datums[p.features[Name].id].axis3
+            
+            
+        
+    #        Rx = np.zeros((3,3))
+            Ry = np.zeros((3,3))
+            Rz = np.zeros((3,3))
+            materialAngle = {}
+            #for each defined ply layup
+            for i in range(0,nLayups):
+                key = p.compositeLayups.keys()[i]
+                sys = p.compositeLayups[key].orientation.localCsys
+                refAxis = str(p.compositeLayups[key].orientation.axis)
+                addAngle = p.compositeLayups[key].orientation.angle
+                #extract layup axis
+                plyaxis1 = p.datums[sys].axis1
+    #            plyaxis2 = p.datums[sys].axis2
+    #            plyaxis3 = p.datums[sys].axis3
+                #for every ply
+                
+                for j in range(0,nPlies):
+                    plyOrientation = p.compositeLayups[key].plies[j].orientation
+                    plyAngle = p.compositeLayups[key].plies[j].orientationValue
+                    plyOrient = str(p.compositeLayups[key].plies[j].axis)
+                    plyOrientType = str(p.compositeLayups[key].plies[j].orientationType)
+                    
+                    #if no material orientation is defined for each individual py then 
+                    #orientatio will be that of the layup
+                    if plyOrientation == None:
+                        direction1 = plyaxis1.direction
+    #                    direction2 = plyaxis2.direction
+    #                    direction3 = plyaxis3.direction
+                        totalAngle = addAngle + plyAngle
+                        
+                        if plyOrientType == 'ANGLE_45':
+                            totalAngle = addAngle + 45
+                        elif plyOrientType == 'ANGLE_90':
+                            totalAngle = addAngle + 90
+                        elif plyOrientType == 'ANGLLE_NEG45':
+                            totalAngle = addAngle - 45
+                            
+                            
+                        if totalAngle != 0: 
+    #                        if refAxis == 'AXIS_1':
+    #                    #rotation wrt x axis
+    #                            Rx = np.array([[1,0,0],[0,math.cos(totalAngle*math.pi/180),math.sin(totalAngle*math.pi/180)],[0,-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180)]])
+    #                            direction2 = np.dot(Rx,plyaxis2.direction)
+    #                            direction3 = np.dot(Rx,plyaxis3.direction)
+                               
+                            if refAxis == 'AXIS_2':
+                                Ry = np.array([[math.cos(totalAngle*math.pi/180),0,-math.sin(totalAngle*math.pi/180)],[0,1,0],[math.sin(totalAngle*math.pi/180),0,math.cos(45*math.pi/180)]])
+                                direction1 = np.dot(Ry,plyaxis1.direction)
+    #                            direction3 = np.dot(Ry,plyaxis3.direction)
+                           
+                            elif refAxis == 'AXIS_3':
+                                Rz = np.array([[math.cos(totalAngle*math.pi/180),-math.sin(totalAngle*math.pi/180),0],[-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180),0],[0,0,1]])
+                                direction1 = np.dot(Rz,plyaxis1.direction)
+    #                            direction2 = np.dot(Rz,plyaxis2.direction)
+                    else:
+                        #if there is a defines Csys for each ply then change the axis defined
+                        plyaxis1 = p.datums[plyOrientation].axis1
+    #                    plyaxis2 = p.datums[plyOrientation].axis2
+    #                    plyaxis3 = p.datums[plyOrientation].axis3
+                    
+                        direction1 = plyaxis1.direction
+    #                    direction2 = plyaxis2.direction
+    #                    direction3 = plyaxis3.direction
+        #               
+                        totalAngle = plyAngle
+                        if plyOrientType == 'ANGLE_45':
+                            totalAngle = 45
+                        elif plyOrientType == 'ANGLE_90':
+                            totalAngle = 90
+                        elif plyOrientType == 'ANGLLE_NEG45':
+                            totalAngle = -45
+                            
+    #                    if plyOrient == 'AXIS_1':
+    #                    #rotation wrt x axis
+    #                        Rx = np.array([[1,0,0],[0,math.cos(totalAngle*math.pi/180),math.sin(totalAngle*math.pi/180)],[0,-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180)]])
+    #                        direction2 = np.dot(Rx,plyaxis2.direction)
+    #                        direction3 = np.dot(Rx,plyaxis3.direction)
+                           
+                        elif plyOrient == 'AXIS_2':
+                            Ry = np.array([[math.cos(totalAngle*math.pi/180),0,-math.sin(totalAngle*math.pi/180)],[0,1,0],[math.sin(totalAngle*math.pi/180),0,math.cos(45*math.pi/180)]])
+                            direction1 = np.dot(Ry,plyaxis1.direction)
+    #                        direction3 = np.dot(Ry,plyaxis3.direction)
+                            
+                        elif plyOrient == 'AXIS_3':
+                            Rz = np.array([[math.cos(totalAngle*math.pi/180),-math.sin(totalAngle*math.pi/180),0],[-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180),0],[0,0,1]])
+                            direction1 = np.dot(Rz,plyaxis1.direction)
+    #                        direction2 = np.dot(Rz,plyaxis2.direction)
+        
+        #            
+                    #finding angle between direction of plane axis and fibre axis    
+                    
+    #                dotx = np.dot(direction1,planeAxis1.direction)
+                    doty = np.dot(direction1,planeAxis2.direction)
+    #                dotz = np.dot(direction1,planeAxis3.direction)
+    #                productx = np.linalg.norm(direction1)*np.linalg.norm(planeAxis1.direction)
+                    producty = np.linalg.norm(direction1)*np.linalg.norm(planeAxis2.direction)
+    
+    
+                    cosy = doty/producty
+    
+                    
+                    theta = 180*math.acos(cosy)/math.pi
+                    
+    
+                    if theta > 90:
+                        theta = 180 - theta
+                            
+                    #assigning angles to elements
+                    plyRegion = p.compositeLayups[key].plies[j].region[0]
+                    plyElements = p.sets[plyRegion].elements
+                    for k in range(0,len(plyElements)):
+                        label = plyElements[k].label
+                        if label in area2.keys() and label in materialAngle.keys(): #check if another ply is assigned to the same element
+                            materialAngle[label].append(theta) #append to the orientation angle of the element
+                                #assume plys have same relative thickness
+                        elif label in area2.keys():
+                            materialAngle[label] = [theta]
+                                #if only one ply is assigned to the element
+            
+        
+    #        print('Angle output for each element with respect to x, y and z axis of cut plane: {0}'.format(materialAngle))
+            
+            #calculating toughness of composite in relation to fibre orientation
+            #Then storing the toughness of composite in a database if existing 
+            #orientation already exist
+            materialG = {}
+            totalU = 0
+
+            for element in area2.keys():
+                theta = materialAngle[element]
+                #writing  and reading to database
+                materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))
+
+      
+                #calculate energy dissipation
+                
+                totalU += np.dot(materialG[element],area2[element])
+                    
+                
+            print('Total energy dissipated from failure: {0} for plane selected at: {1}, {2}, {3}'.format(float(totalU), s,q,r))
+            t2 = time.time()
+            print('Run time: {0}'.format(t2-t1))
