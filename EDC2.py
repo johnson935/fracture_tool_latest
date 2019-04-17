@@ -57,6 +57,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
     fileNumber = 1
     axis = []
     plotU = []
+    plotF = []
     x = []
     y = []
     z = []
@@ -65,12 +66,12 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
     if len(elementSet) == 0 or len(elementSet) == None:
         raise Exception('No mesh defined please define mesh before using software')
     #setting material properties
-    if cusMat == 'Default Material':
+    if cusMat == 'Material from database':
         if mat == 'T800s/M21':
             G90 = 0.255
             G0 = 209
             sigma1 = 3066.96
-            sigma2 = 43.9
+            
         elif mat == 'T300/913':
             G90 = 0.211
             G0 = 133
@@ -82,16 +83,18 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         elif cusMat == True:
             G90 = g90
             G0 = g0
-    elif cusMat == 'Custom Material':
-        G90 = g90
-        G0 = g0
-        sigma1 = cusSigma
-    if unit == 'mm/N':
+    if unit == 'millimeter':
         G90 = G90/1000000
         G0 = G0/1000000
         sigma1 = sigma1/1000000
     
-    if multiPlane == True and selectAxis == 'Select Direction Of Global Axis Perpendicular To Desired Fracture Planes':
+    if cusMat == 'Custom Material':
+        G90 = g90
+        G0 = g0
+        sigma1 = cusSigma
+
+    
+    if multiPlane == True and selectAxis == 'Use global axis':
         for n in range(0,len(nodeSet)):
             x.append( nodeSet[n].coordinates[0])
             y.append(nodeSet[n].coordinates[1])
@@ -296,9 +299,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             for i in range(0,len(vec)):
                                 vec[i,:] = vertexplyi[i,:] - vertexplyj[i,:]
                                 if np.dot(perp, vec[i,:]) != 0:
-                                    lamb.append((d - np.dot(perp, vertexplyj[i,:]))/(np.dot(perp, vec[i,:]))) 
+                                    lamb.append(round((d - np.dot(perp, vertexplyj[i,:]))/(np.dot(perp, vec[i,:])),3)) 
                                 else:
-                                    lamb.append(-1)
+                                    lamb.append(-100)
                             k = 0  
                             intercept = np.zeros((12,3))
                             count = Counter(lamb)
@@ -307,7 +310,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             #                print(lamb)
                             # checking for every value of lambda if there is an intercept
                             for i in range(0,len(lamb)):
-                                if lamb[i] <= 1 and lamb[i] > 0:
+                                if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
+                                    continue
+                                elif lamb[i] < 1 and lamb[i] >= 0:
                                     #if there is an intercept find the coordinates using parametric method
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
@@ -320,7 +325,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 # check if intersection is at the nodes and if the itersections lie
                                 # diagonally directly at the nodes so we have lambda = 1 and 0 
                                 # the same number of times
-                                elif lamb[i] == 0 and count[0] == count[1]:
+                                elif lamb[i] == 1 and count[0] == count[1]:
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
                                     if lamb[i] == 0:
@@ -365,10 +370,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     #is negative then the point lies on one side, if positive
                                     #point lies on other side
                                     if cros[2] < 0:
-                                        sin = -refNorm/product
+                                        sin = round(-refNorm/product,5)
                                     else:
-                                        sin = refNorm/product
-                                    cos = dot/product
+                                        sin = round(refNorm/product,5)
+                                    cos = round(dot/product,5)
                                     #between 0 and 90
                                     if sin >= 0 and cos >= 0:
                                         theta = (180*math.acos(cos))/math.pi
@@ -525,7 +530,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         
                         cosy = doty/producty
         
-                        
+          
                         theta = 180*math.acos(cosy)/math.pi
                         
         
@@ -574,6 +579,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     pos[totalU].append(z)
                 print('Total energy dissipated from failure: {0} kJ at {1}, = {2}, Critical force: {3} MN'.format(float(totalU),ax,z,float(totalF)))
                 plotU.append(totalU)
+                plotF.append(totalF)
         critU = min(U.keys())
         planes = U[critU]
         force = F[critU]
@@ -610,8 +616,33 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         title='{0} coordinate'.format(ax))
         #changing view to graph
         session.viewports['Viewport: 1'].setValues(displayedObject=xyp)
+ 
     
-    if multiPlane == True and selectAxis == 'Create Own Desired Axis':
+    # force plot
+        fileNameF = 'Force Output{0}'.format(fileNumber)
+        while fileName in outputFiles:
+            fileNumber += 1
+            fileNameF = 'Force Output{0}'.format(fileNumber)
+        xyp = session.XYPlot(fileNameF)
+    
+        chartName = xyp.charts.keys()[0]
+        chart = xyp.charts[chartName]
+        c = np.empty((len(axis),2))
+        c[:,0] = axis
+        c[:,1] = plotF
+        xy2 = xyPlot.XYData(data=(c), sourceDescription='Entered from keyboard', 
+            )
+        c2 = session.Curve(xyData=xy2)
+        chart.setValues(curvesToPlot=(c2, ), )
+        session.charts[chartName].axes2[0].axisData.setValues(useSystemTitle=False, 
+        title='Force')
+        session.charts[chartName].axes1[0].axisData.setValues(useSystemTitle=False, 
+        title='{0} coordinate'.format(ax))
+        session.viewports['Viewport: 1'].setValues(displayedObject=xyp)
+        
+        
+    #if ownaxis selected 
+    if multiPlane == True and selectAxis == 'Use two points':
         axisPoints = kwargs.get('axisPoints')
         # timing script
         t1 = time.time()
@@ -628,7 +659,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 raise Exception('Points not selected')
             s = np.array(axisPointStart.coordinates)
             q = np.array(axisPointEnd.coordinates)
-        elif axisPoints == 'Enter Points Manually':
+        elif axisPoints == 'Define Points Manually':
             coordAxisStart = kwargs.get('coordAxisStart')
             coordAxisEnd = kwargs.get('coordAxisEnd')
             print(coordAxisStart)
@@ -809,16 +840,18 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             for i in range(0,len(vec)):
                                 vec[i,:] = vertexplyi[i,:] - vertexplyj[i,:]
                                 if np.dot(perp, vec[i,:]) != 0:
-                                    lamb.append((d - np.dot(perp, vertexplyj[i,:]))/(np.dot(perp, vec[i,:]))) 
+                                    lamb.append(round((d - np.dot(perp, vertexplyj[i,:]))/(np.dot(perp, vec[i,:])),3)) 
                                 else:
-                                    lamb.append(-1)
+                                    lamb.append(-100)
                             k = 0  
                             intercept = np.zeros((12,3))
                             count = Counter(lamb)
             #               
                             # checking for every value of lambda if there is an intercept
                             for i in range(0,len(lamb)):
-                                if lamb[i] <= 1 and lamb[i] > 0:
+                                if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
+                                    continue
+                                elif lamb[i] < 1 and lamb[i] >= 0:
                                     #if there is an intercept find the coordinates using parametric method
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
@@ -831,7 +864,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 # check if intersection is at the nodes and if the itersections lie
                                 # diagonally directly at the nodes so we have lambda = 1 and 0 
                                 # the same number of times
-                                elif lamb[i] == 0 and count[0] == count[1]:
+                                elif lamb[i] == 1 and count[0] == count[1]:
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
                                     if lamb[i] == 0:
@@ -840,7 +873,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                                 k -= 1
                                     k += 1
                                     
-                                if lamb[i] <=1 and lamb[i] >= 0:
+                                if abs(lamb[i]) <=1 and lamb[i] >= 0:
                                     lambRecord.append(lamb[i])
                             #find the areas by sorting the coordinates of intersections
                             norm = 0
@@ -874,10 +907,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     #is negative then the point lies on one side, if positive
                                     #point lies on other side
                                     if cros[2] < 0:
-                                        sin = -refNorm/product
+                                        sin = round(-refNorm/product,5)
                                     else:
-                                        sin = refNorm/product
-                                    cos = dot/product
+                                        sin = round(refNorm/product,5)
+                                    cos = round(dot/product,5)
                                     #between 0 and 90
                                     if sin >= 0 and cos >= 0:
                                         theta = (180*math.acos(cos))/math.pi
@@ -1053,6 +1086,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     pos[totalU].append(z)
                 print('Total energy dissipated from failure: {0} kJ, Critical force: {1} MN at Point: {2}'.format(float(totalU),float(totalF),pt2))
                 plotU.append(totalU)
+                plotF.append(totalF)
         critU = min(U.keys())
         planes = U[critU]
         force = F[totalU]
@@ -1081,11 +1115,32 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         title='Distance along axis path')
         session.viewports['Viewport: 1'].setValues(displayedObject=xyp)
     
+        fileNameF = 'Force Output{0}'.format(fileNumber)
+        while fileName in outputFiles:
+            fileNumber += 1
+            fileNameF = 'Force Output{0}'.format(fileNumber)
+        xyp = session.XYPlot(fileNameF)
     
+        chartName = xyp.charts.keys()[0]
+        chart = xyp.charts[chartName]
+        c = np.empty((len(axis),2))
+        c[:,0] = axis
+        c[:,1] = plotF
+        xy2 = xyPlot.XYData(data=(c), sourceDescription='Entered from keyboard', 
+            )
+        c2 = session.Curve(xyData=xy2)
+        chart.setValues(curvesToPlot=(c2, ), )
+        session.charts[chartName].axes2[0].axisData.setValues(useSystemTitle=False, 
+        title='Force')
+        session.charts[chartName].axes1[0].axisData.setValues(useSystemTitle=False, 
+        title='Distance along axis path')
+        session.viewports['Viewport: 1'].setValues(displayedObject=xyp)
+        
+        
     if singlePlane == True:
         area2 = {}
         selectPsingle = kwargs.get('selectPsingle')
-        if selectPsingle == 'Select Three Points (Nodes In Mesh) On Fracture Plane:':
+        if selectPsingle == 'Select points in viewport:':
             coord1 = kwargs.get('coord1')
             coord2 = kwargs.get('coord2')
             coord3 = kwargs.get('coord3')
@@ -1271,15 +1326,17 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                         for i in range(0,len(vec)):
                             vec[i,:] = vertexplyi[i,:] - vertexplyj[i,:]
                             if np.dot(perp, vec[i,:]) != 0:
-                                lamb.append((d - np.dot(perp, vertexplyj[i,:]))/(np.dot(perp, vec[i,:]))) 
+                                lamb.append(round((d - np.dot(perp, vertexplyj[i,:]))/(np.dot(perp, vec[i,:])),3)) 
                             else:
-                                lamb.append(-1)
+                                lamb.append(-100)
                         k = 0  
                         intercept = np.zeros((12,3))
                         count = Counter(lamb)
             # checking for every value of lambda if there is an intercept
                         for i in range(0,len(lamb)):
-                            if lamb[i] <= 1 and lamb[i] > 0:
+                            if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
+                                continue
+                            elif lamb[i] < 1 and lamb[i] >= 0:
                                 #if there is an intercept find the coordinates using parametric method
                                 temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                 intercept[k,:] = temp
@@ -1292,7 +1349,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             # check if intersection is at the nodes and if the itersections lie
                             # diagonally directly at the nodes so we have lambda = 1 and 0 
                             # the same number of times
-                            elif lamb[i] == 0 and count[0] == count[1]:
+                            elif lamb[i] == 1 and count[0] == count[1]:
                                 temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                 intercept[k,:] = temp
                                 if lamb[i] == 0:
@@ -1301,7 +1358,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                             k -= 1
                                 k += 1
                                 
-                            if lamb[i] <=1 and lamb[i] >= 0:
+                            if abs(lamb[i]) <=1 and lamb[i] >= 0:
                                 lambRecord.append(lamb[i])
                         #find the areas by sorting the coordinates of intersections
                         norm = 0
@@ -1335,10 +1392,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 #is negative then the point lies on one side, if positive
                                 #point lies on other side
                                 if cros[2] < 0:
-                                    sin = -refNorm/product
+                                    sin = round(-refNorm/product,5)
                                 else:
-                                    sin = refNorm/product
-                                cos = dot/product
+                                    sin = round(refNorm/product,5)
+                                cos = round(dot/product,5)
                                 #between 0 and 90
                                 if sin >= 0 and cos >= 0:
                                     theta = (180*math.acos(cos))/math.pi
