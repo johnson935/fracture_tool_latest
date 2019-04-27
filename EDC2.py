@@ -311,6 +311,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             
                             # checking for every value of lambda if there is an intercept
                             for i in range(0,len(lamb)):
+                                if lamb[i] <=1 and lamb[i] >= 0:
+                                    lambRecord.append(lamb[i])
+                                
                                 if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
                                     continue
                                 elif lamb[i] < 1 and lamb[i] >= 0:
@@ -335,8 +338,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                                 k -= 1
                                     k += 1
                                     
-                                if lamb[i] <=1 and lamb[i] >= 0:
-                                    lambRecord.append(lamb[i])
                         #find the areas by sorting the coordinates of intersections
                             norm = 0
                             angles = {}
@@ -850,6 +851,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             
                             # checking for every value of lambda if there is an intercept
                             for i in range(0,len(lamb)):
+                                if lamb[i] <=1 and lamb[i] >= 0:
+                                    lambRecord.append(lamb[i])
+                                    
                                 if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
                                     continue
                                 elif lamb[i] < 1 and lamb[i] >= 0:
@@ -874,8 +878,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                                 k -= 1
                                     k += 1
                                     
-                                if lamb[i] <=1 and lamb[i] >= 0:
-                                    lambRecord.append(lamb[i])
+                                
                         #find the areas by sorting the coordinates of intersections
                             norm = 0
                             angles = {}
@@ -1339,6 +1342,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                         
                         # checking for every value of lambda if there is an intercept
                         for i in range(0,len(lamb)):
+                            if lamb[i] <=1 and lamb[i] >= 0:
+                                lambRecord.append(lamb[i])
+                            
                             if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
                                 continue
                             elif lamb[i] < 1 and lamb[i] >= 0:
@@ -1362,9 +1368,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                         if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
                                             k -= 1
                                 k += 1
-                                
-                            if lamb[i] <=1 and lamb[i] >= 0:
-                                lambRecord.append(lamb[i])
                         #find the areas by sorting the coordinates of intersections
                         norm = 0
                         angles = {}
