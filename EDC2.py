@@ -45,6 +45,8 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         raise Exception('Enter number of fracture planes')
     if g0 == None or g90 == None:
         raise Exception('Enter properties of material')
+    if len(p.compositeLayups.keys()) == 0:
+        raise Exception('Please define layup before using tool')
     p = mdb.models[model].parts[part]
     
     # timing script
@@ -153,7 +155,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             vertexsubply = np.zeros((8,3))
             #finding area of intercepts in the general case of any plane interception on the element
             for e in range(0,len(elementSet)):
-        #        if e == 3:
+    #        if e == 3:
                 connected = []
                     
                 connected = elementSet[e].connectivity
@@ -173,8 +175,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
                     region = []
                     nLayups = len(p.compositeLayups.keys())
-                    if nLayups == 0:
-                        raise Exception('Composite layup not defined please define layup before using software')
                     # number of layups
                     for n in range(0,nLayups):
                         key = p.compositeLayups.keys()[n]
@@ -188,7 +188,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             plyThickness.append(p.compositeLayups[key].plies[j].thickness)
                             region.append(p.compositeLayups[key].plies[j].region[0])
                         if sum(plyThickness) != 1 and region != [region[0]] * nPlies:
-                            raise Exception('Defined relative thiknesses do not add up to one and/or regions defined for compositelayup are different')
+                            sys.exit('Defined relative thiknesses do not add up to one and/or regions defined for compositelayup are different')
                         plyRelThickness = 0  
                         # Three possible directions for the ply stack
                         # Vertex change depending on stack direction
@@ -303,11 +303,12 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 else:
                                     lamb.append(-100)
                             k = 0  
+                           
                             intercept = np.zeros((12,3))
                             count = Counter(lamb)
             #                print(vec, vertexplyj)
             #                print(vertexplyi)
-            #                print(lamb)
+                            
                             # checking for every value of lambda if there is an intercept
                             for i in range(0,len(lamb)):
                                 if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
@@ -317,7 +318,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
                                     #if lambda = 1 check if there are over lapping intersections
-                                    if lamb[i] == 1:
+                                    if lamb[i] == 0:
                                         for j in range(0,len(intercept)):
                                             if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
                                                 k -= 1
@@ -328,7 +329,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 elif lamb[i] == 1 and count[0] == count[1]:
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
-                                    if lamb[i] == 0:
+                                    if lamb[i] == 1:
                                         for j in range(0,len(intercept)):
                                             if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
                                                 k -= 1
@@ -336,12 +337,11 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     
                                 if lamb[i] <=1 and lamb[i] >= 0:
                                     lambRecord.append(lamb[i])
-            #                print(intercept)
-                            #find the areas by sorting the coordinates of intersections
+                        #find the areas by sorting the coordinates of intersections
                             norm = 0
                             angles = {}
-            
-            #                        print(lamb)
+        
+        #                        print(lamb)
                             #for just three points of intersection find area of triangle
                             if k == 3:
                                 pq = intercept[0,:] - intercept[1,:]
@@ -350,7 +350,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 norm += np.linalg.norm(cros)/2
                                 area2[label].append(norm)
                             #things become harder with more than 3 points
-                            elif 4 <= k <= 6:
+                            elif k  >= 4:
                                 #define reference vector
                                 ref = intercept[0,:] - intercept[1,:]
                                 #set the reference angle of the reference vector to zero
@@ -370,10 +370,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     #is negative then the point lies on one side, if positive
                                     #point lies on other side
                                     if cros[2] < 0:
-                                        sin = round(-refNorm/product,5)
+                                        sin = round(-refNorm/product,3)
                                     else:
-                                        sin = round(refNorm/product,5)
-                                    cos = round(dot/product,5)
+                                        sin = round(refNorm/product,3)
+                                    cos = round(dot/product,3)
                                     #between 0 and 90
                                     if sin >= 0 and cos >= 0:
                                         theta = (180*math.acos(cos))/math.pi
@@ -397,7 +397,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     pr = intercept[0,:] - intercept[sorted_index[i+1],:]
                                     cros = np.cross(pq,pr)
                                     norm += np.linalg.norm(cros)/2
+                                    
                                 area2[label].append(norm)
+                            
                             else:
                                 area2[label].append(0)
                             
@@ -407,7 +409,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 vertexply[i,:] = vertexply[i+4,:]
                            #5.7 seconds when added to only consider elements near the plane and 28.4 seconds without modifycation 
             if lambRecord[0:] == [1] * len(lambRecord) or lambRecord[0:] == [0] * len(lambRecord):
-                        area2 = {}
+                            area2 = {}
             for label in area2.keys():
                 if area2[label] == [0] * nPlies or area2[label] == []:
                     del area2[label]
@@ -693,7 +695,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             vertexsubply = np.zeros((8,3))
             #finding area of intercepts in the general case of any plane interception on the element
             for e in range(0,len(elementSet)):
-    
                 connected = []
                     
                 connected = elementSet[e].connectivity
@@ -713,9 +714,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
                     region = []
                     nLayups = len(p.compositeLayups.keys())
-                    if nLayups == 0:
-                        sys.exit('Composite layup not defined please define layup before using software')
-
                     # number of layups
                     for n in range(0,nLayups):
                         key = p.compositeLayups.keys()[n]
@@ -844,9 +842,12 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 else:
                                     lamb.append(-100)
                             k = 0  
+                           
                             intercept = np.zeros((12,3))
                             count = Counter(lamb)
-            #               
+            #                print(vec, vertexplyj)
+            #                print(vertexplyi)
+                            
                             # checking for every value of lambda if there is an intercept
                             for i in range(0,len(lamb)):
                                 if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
@@ -856,7 +857,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
                                     #if lambda = 1 check if there are over lapping intersections
-                                    if lamb[i] == 1:
+                                    if lamb[i] == 0:
                                         for j in range(0,len(intercept)):
                                             if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
                                                 k -= 1
@@ -867,18 +868,19 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 elif lamb[i] == 1 and count[0] == count[1]:
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
-                                    if lamb[i] == 0:
+                                    if lamb[i] == 1:
                                         for j in range(0,len(intercept)):
                                             if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
                                                 k -= 1
                                     k += 1
                                     
-                                if abs(lamb[i]) <=1 and lamb[i] >= 0:
+                                if lamb[i] <=1 and lamb[i] >= 0:
                                     lambRecord.append(lamb[i])
-                            #find the areas by sorting the coordinates of intersections
+                        #find the areas by sorting the coordinates of intersections
                             norm = 0
                             angles = {}
-    
+        
+        #                        print(lamb)
                             #for just three points of intersection find area of triangle
                             if k == 3:
                                 pq = intercept[0,:] - intercept[1,:]
@@ -887,7 +889,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 norm += np.linalg.norm(cros)/2
                                 area2[label].append(norm)
                             #things become harder with more than 3 points
-                            elif 4<= k <= 6:
+                            elif k  >= 4:
                                 #define reference vector
                                 ref = intercept[0,:] - intercept[1,:]
                                 #set the reference angle of the reference vector to zero
@@ -907,10 +909,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     #is negative then the point lies on one side, if positive
                                     #point lies on other side
                                     if cros[2] < 0:
-                                        sin = round(-refNorm/product,5)
+                                        sin = round(-refNorm/product,3)
                                     else:
-                                        sin = round(refNorm/product,5)
-                                    cos = round(dot/product,5)
+                                        sin = round(refNorm/product,3)
+                                    cos = round(dot/product,3)
                                     #between 0 and 90
                                     if sin >= 0 and cos >= 0:
                                         theta = (180*math.acos(cos))/math.pi
@@ -934,7 +936,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                     pr = intercept[0,:] - intercept[sorted_index[i+1],:]
                                     cros = np.cross(pq,pr)
                                     norm += np.linalg.norm(cros)/2
+                                    
                                 area2[label].append(norm)
+                            
                             else:
                                 area2[label].append(0)
                             
@@ -1199,9 +1203,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
                 region = []
                 nLayups = len(p.compositeLayups.keys())
-                if nLayups == 0:
-                        sys.exit('Composite layup not defined please define layup before using software')
-
                 # number of layups
                 for n in range(0,nLayups):
                     key = p.compositeLayups.keys()[n]
@@ -1330,9 +1331,13 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             else:
                                 lamb.append(-100)
                         k = 0  
+                       
                         intercept = np.zeros((12,3))
                         count = Counter(lamb)
-            # checking for every value of lambda if there is an intercept
+        #                print(vec, vertexplyj)
+        #                print(vertexplyi)
+                        
+                        # checking for every value of lambda if there is an intercept
                         for i in range(0,len(lamb)):
                             if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
                                 continue
@@ -1341,7 +1346,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                 intercept[k,:] = temp
                                 #if lambda = 1 check if there are over lapping intersections
-                                if lamb[i] == 1:
+                                if lamb[i] == 0:
                                     for j in range(0,len(intercept)):
                                         if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
                                             k -= 1
@@ -1352,18 +1357,19 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             elif lamb[i] == 1 and count[0] == count[1]:
                                 temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                 intercept[k,:] = temp
-                                if lamb[i] == 0:
+                                if lamb[i] == 1:
                                     for j in range(0,len(intercept)):
                                         if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
                                             k -= 1
                                 k += 1
                                 
-                            if abs(lamb[i]) <=1 and lamb[i] >= 0:
+                            if lamb[i] <=1 and lamb[i] >= 0:
                                 lambRecord.append(lamb[i])
                         #find the areas by sorting the coordinates of intersections
                         norm = 0
                         angles = {}
-
+    
+    #                        print(lamb)
                         #for just three points of intersection find area of triangle
                         if k == 3:
                             pq = intercept[0,:] - intercept[1,:]
@@ -1372,7 +1378,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             norm += np.linalg.norm(cros)/2
                             area2[label].append(norm)
                         #things become harder with more than 3 points
-                        elif 4 <= k <= 6:
+                        elif k  >= 4:
                             #define reference vector
                             ref = intercept[0,:] - intercept[1,:]
                             #set the reference angle of the reference vector to zero
@@ -1392,10 +1398,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 #is negative then the point lies on one side, if positive
                                 #point lies on other side
                                 if cros[2] < 0:
-                                    sin = round(-refNorm/product,5)
+                                    sin = round(-refNorm/product,3)
                                 else:
-                                    sin = round(refNorm/product,5)
-                                cos = round(dot/product,5)
+                                    sin = round(refNorm/product,3)
+                                cos = round(dot/product,3)
                                 #between 0 and 90
                                 if sin >= 0 and cos >= 0:
                                     theta = (180*math.acos(cos))/math.pi
@@ -1419,7 +1425,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 pr = intercept[0,:] - intercept[sorted_index[i+1],:]
                                 cros = np.cross(pq,pr)
                                 norm += np.linalg.norm(cros)/2
+                                
                             area2[label].append(norm)
+                        
                         else:
                             area2[label].append(0)
                         
@@ -1429,7 +1437,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             vertexply[i,:] = vertexply[i+4,:]
                        #5.7 seconds when added to only consider elements near the plane and 28.4 seconds without modifycation 
         if lambRecord[0:] == [1] * len(lambRecord) or lambRecord[0:] == [0] * len(lambRecord):
-                    area2 = {}
+                        area2 = {}
         for label in area2.keys():
             if area2[label] == [0] * nPlies or area2[label] == []:
                 del area2[label]
