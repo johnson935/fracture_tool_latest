@@ -37,6 +37,8 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
     g0 = kwargs.get('g0')
     g90 = kwargs.get('g90')
     cusSigma = kwargs.get('cusSigma')
+    cusSigma2 = kwargs.get('cusSigma2')
+    cusTau = kwargs.get('cusTau')
     selectAxis = kwargs.get('selectAxis')
     axisGlobal = kwargs.get('axisGlobal')
     if part == '':
@@ -45,10 +47,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         raise Exception('Enter number of fracture planes')
     if g0 == None or g90 == None:
         raise Exception('Enter properties of material')
+    
+    p = mdb.models[model].parts[part]
     if len(p.compositeLayups.keys()) == 0:
         raise Exception('Please define layup before using tool')
-    p = mdb.models[model].parts[part]
-    
     # timing script
     t1 = time.time()
     # creating plane
@@ -70,31 +72,36 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
     #setting material properties
     if cusMat == 'Material from database':
         if mat == 'T800s/M21':
-            G90 = 0.255
-            G0 = 209
-            sigma1 = 3066.96
-            
+            G90 = 255
+            G0 = 209000
+            sigma1 = 2451000000
+            sigma2 = 147000000
+            tau12 = 145000000
         elif mat == 'T300/913':
-            G90 = 0.211
-            G0 = 133
-            sigma1 = 3530
+            G90 = 211
+            G0 = 133000
+            sigma1 = 582000000
+            sigma2 = 65500000
+            tau12 = 67900000
+            
         elif mat == 'T300/920':
-            G90 = 0.456
-            G0 = 132
-            sigma1 = 3530
-        elif cusMat == True:
-            G90 = g90
-            G0 = g0
+            G90 = 456
+            G0 = 132000
+            sigma1 = 582000000
+            sigma2 = 34900000
+            tau12 = 67900000
     if unit == 'millimeter':
         G90 = G90/1000000
         G0 = G0/1000000
         sigma1 = sigma1/1000000
-    
+        sigma2 = sigma2/1000000
+        tau12 = tau12/1000000
     if cusMat == 'Custom Material':
         G90 = g90
         G0 = g0
         sigma1 = cusSigma
-
+        sigma2 = cusSigma2
+        tau12 = cusTau
     
     if multiPlane == True and selectAxis == 'Use global axis':
         for n in range(0,len(nodeSet)):
@@ -559,6 +566,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 #Then storing the toughness of composite in a database if existing 
                 #orientation already exist
                 materialG = {}
+                sigmaFibre = []
+                fMatrix = []
+                sigmaMatrix = []
                 totalU = 0
                 materialSigma1 = {}
                 totalF = 0
@@ -567,9 +577,13 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     theta = materialAngle[element]
                     #writing  and reading to database
                     materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))
-                    materialSigma1[element] = sigma1 * np.cos(np.multiply(theta,np.pi/180))
+#                    materialSigma1[element] = sigma1 * np.cos(np.multiply(theta,np.pi/180))
+                    sigmaFibre = np.divide(sigma1,np.power(np.cos(np.multiply(theta,np.pi/180)),2))
+                    fMatrix = np.sqrt(np.power(np.divide(np.sin(np.multiply(theta,np.pi/180)), sigma2),2)
+                    + np.power(np.divide(np.multiply(np.sin(np.multiply(theta,np.pi/180)),np.cos(np.multiply(theta,np.pi/180))),tau12),2))
+                    sigmaMatrix = np.power(fMatrix,-1)
+                    materialSigma1[element] = np.minimum(sigmaFibre,sigmaMatrix)
                     #calculate energy dissipation
-                    
                     totalU += np.dot(materialG[element],area2[element])
                     totalF += np.dot(materialSigma1[element],area2[element])
                 if  totalU not in U.keys():  
@@ -580,14 +594,14 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     U[totalU].append(p.features.keys()[-2])
                     F[totalU].append(totalF)
                     pos[totalU].append(z)
-                print('Total energy dissipated from failure: {0} kJ at {1}, = {2}, Critical force: {3} MN'.format(float(totalU),ax,z,float(totalF)))
+                print('Total energy dissipated from failure: {0} J at {1}, = {2}, Critical force: {3} N'.format(format(float(totalU),'E'),ax,z,format(float(totalF),'E')))
                 plotU.append(totalU)
                 plotF.append(totalF)
         critU = min(U.keys())
         planes = U[critU]
         force = F[critU]
         critPos = pos[critU]      
-        print('Critical energy is: {0} kJ. Critical Force: {1} MN at the following planes: {2}, at {3} = {4}'.format(critU,force,planes,ax,critPos))
+        print('Critical energy is: {0} J. Critical Force: {1} N at the following planes: {2}, at {3} = {4}'.format(format(critU,'E'), format(force[0],'E'),planes,ax,critPos))
         t2 = time.time()
         print('Run time: {0}'.format(t2-t1))
         
@@ -655,7 +669,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         pos = {}
         axis = []
         plotU = []
-        if axisPoints == 'Select 2 Points (Nodes In Mesh) To Create Axis':
+        if axisPoints == 'Select points in viewport:':
             axisPointStart = kwargs.get('axisPointStart') 
             axisPointEnd = kwargs.get('axisPointEnd')
             if axisPointStart == None or axisPointEnd == None:
@@ -665,7 +679,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         elif axisPoints == 'Define Points Manually':
             coordAxisStart = kwargs.get('coordAxisStart')
             coordAxisEnd = kwargs.get('coordAxisEnd')
-            print(coordAxisStart)
             if coordAxisStart == () or coordAxisEnd == ():
                 raise Exception('Points not defined')
             elif len(coordAxisStart[0]) != 3 or len(coordAxisEnd[0]) != 3:
@@ -955,6 +968,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             for label in area2.keys():
                 if area2[label] == [0] * nPlies or area2[label] == []:
                     del area2[label]
+            
             fileNumber = 0
             if area2 != {}:
             # extracting material orientation
@@ -1078,7 +1092,11 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     theta = materialAngle[element]
                     #writing  and reading to database
                     materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))
-                    materialSigma1[element] = sigma1 * np.cos(np.multiply(theta, np.pi/180))
+                    sigmaFibre = np.divide(sigma1,np.power(np.cos(np.multiply(theta,np.pi/180)),2))
+                    fMatrix = np.sqrt(np.power(np.divide(np.sin(np.multiply(theta,np.pi/180)), sigma2),2)
+                    + np.power(np.divide(np.multiply(np.sin(np.multiply(theta,np.pi/180)),np.cos(np.multiply(theta,np.pi/180))),tau12),2))
+                    sigmaMatrix = np.power(fMatrix,-1)
+                    materialSigma1[element] = np.minimum(sigmaFibre,sigmaMatrix)
                     #calculate energy dissipation
                     
                     totalU += np.dot(materialG[element],area2[element])
@@ -1091,13 +1109,13 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     U[totalU].append(p.features.keys()[-2])
                     F[totalU].append(totalF)
                     pos[totalU].append(z)
-                print('Total energy dissipated from failure: {0} kJ, Critical force: {1} MN at Point: {2}'.format(float(totalU),float(totalF),pt2))
+                print('Total energy dissipated from failure: {0} J, Critical force: {1} N at Point: {2}'.format(format(float(totalU),'E'),format(float(totalF),'E'),pt2))
                 plotU.append(totalU)
                 plotF.append(totalF)
         critU = min(U.keys())
         planes = U[critU]
         force = F[totalU]
-        print('Critical energy is: {0} kJ. Critical Force {1} MN at the following planes: {2}, at Point {3}'.format(critU,force,planes,pt2))
+        print('Critical energy is: {0} J. Critical Force {1} N at the following planes: {2}, at Point {3}'.format(format(critU,'E'), format(force[0],'E'),planes,pt2))
         t2 = time.time()
         print('Run time: {0}'.format(t2-t1))
         
@@ -1444,7 +1462,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         for label in area2.keys():
             if area2[label] == [0] * nPlies or area2[label] == []:
                 del area2[label]
-
+        
         if area2 != {}:
         # extracting material orientation
             Name = 'csys-plane'
@@ -1570,14 +1588,18 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 theta = materialAngle[element]
                 #writing  and reading to database
                 materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))
-                materialSigma1[element] = sigma1 * np.cos(np.multiply(theta,np.pi/180))
-      
+                
+                sigmaFibre = np.divide(sigma1,np.power(np.cos(np.multiply(theta,np.pi/180)),2))
+                fMatrix = np.sqrt(np.power(np.divide(np.sin(np.multiply(theta,np.pi/180)), sigma2),2)
+                + np.power(np.divide(np.multiply(np.sin(np.multiply(theta,np.pi/180)),np.cos(np.multiply(theta,np.pi/180))),tau12),2))
+                sigmaMatrix = np.power(fMatrix,-1)
+                materialSigma1[element] = np.minimum(sigmaFibre,sigmaMatrix)
                 #calculate energy dissipation
                 
                 totalU += np.dot(materialG[element],area2[element])
                 totalF += np.dot(materialSigma1[element],area2[element])    
-                
-            print('Total energy dissipated from failure: {0} kJ. Critical Force: {1} MN for plane selected at: {2}, {3}, {4}'.format(float(totalU),float(totalF), s,q,r))
+               
+            print('Total energy dissipated from failure: {0} J. Critical Force: {1} N for plane selected at: {2}, {3}, {4}'.format(format(float(totalU),'E'),format(float(totalF),'E'), s,q,r))
             t2 = time.time()
             print('Run time: {0}'.format(t2-t1))
     if multiPlane == False and singlePlane == False:
