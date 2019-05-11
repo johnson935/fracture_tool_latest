@@ -170,7 +170,14 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 plyElements = p.sets[plyRegion].elements
                 #ply stack direction
                 stackAxis = p.compositeLayups[key].orientation.stackDirection
-                plyThickness = []
+                plyThickness = 0
+                region = []
+                for j in range(0,nPlies):
+                    plyThickness += p.compositeLayups[key].plies[j].thickness
+                    region.append(p.compositeLayups[key].plies[j].region[0])       
+                if int(plyThickness) != 1:
+                    raise Exception('Defined relative thiknesses do not add up to one')
+
         #        if e == 3:
                 connected = []
                 for e in range(0,len(plyElements)):
@@ -189,15 +196,8 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     diag = math.sqrt(maxSize**2+maxSize**2)
                     # calculate the elements near the plane taking account element mesh size
                     if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
-                        region = []
-                        nLayups = len(p.compositeLayups.keys())
                             # calculate of the total relative thickness of plies add to one otherwise 
                             #terminate the program
-                        for j in range(0,nPlies):
-                            plyThickness.append(p.compositeLayups[key].plies[j].thickness)
-                            region.append(p.compositeLayups[key].plies[j].region[0])
-                        if sum(plyThickness) != 1 and region != [region[0]] * nPlies:
-                            sys.exit('Defined relative thiknesses do not add up to one and/or regions defined for compositelayup are different')
                         plyRelThickness = 0  
                         # Three possible directions for the ply stack
                         # Vertex change depending on stack direction
@@ -691,6 +691,16 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 plyThickness = []
         #        if e == 3:
                 connected = []
+                region = []
+                nLayups = len(p.compositeLayups.keys())
+                # calculate of the total relative thickness of plies add to one otherwise 
+                #terminate the program
+                for j in range(0,nPlies):
+                    plyThickness.append(p.compositeLayups[key].plies[j].thickness)
+                    region.append(p.compositeLayups[key].plies[j].region[0])
+                if sum(plyThickness) != 1:
+                    sys.exit('Defined relative thiknesses do not add up to one')
+
                 for e in range(0,len(plyElements)):
                     connected = plyElements[e].connectivity
                     label = plyElements[e].label
@@ -707,15 +717,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     diag = math.sqrt(maxSize**2+maxSize**2)
                     # calculate the elements near the plane taking account element mesh size
                     if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
-                        region = []
-                        nLayups = len(p.compositeLayups.keys())
-                            # calculate of the total relative thickness of plies add to one otherwise 
-                            #terminate the program
-                        for j in range(0,nPlies):
-                            plyThickness.append(p.compositeLayups[key].plies[j].thickness)
-                            region.append(p.compositeLayups[key].plies[j].region[0])
-                        if sum(plyThickness) != 1 and region != [region[0]] * nPlies:
-                            sys.exit('Defined relative thiknesses do not add up to one and/or regions defined for compositelayup are different')
                         plyRelThickness = 0  
                         # Three possible directions for the ply stack
                         # Vertex change depending on stack direction
@@ -1182,6 +1183,15 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             #ply stack direction
             stackAxis = p.compositeLayups[key].orientation.stackDirection
             plyThickness = []
+            region = []
+            # calculate of the total relative thickness of plies add to one otherwise 
+            #terminate the program
+            for j in range(0,nPlies):
+                plyThickness.append(p.compositeLayups[key].plies[j].thickness)
+                region.append(p.compositeLayups[key].plies[j].region[0])
+            if sum(plyThickness) != 1:
+                raise Exception('Defined relative thiknesses do not add up to one')
+
     #        if e == 3:
             connected = []
             for e in range(0,len(plyElements)):
@@ -1200,15 +1210,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 diag = math.sqrt(maxSize**2+maxSize**2)
                 # calculate the elements near the plane taking account element mesh size
                 if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
-                    region = []
-                    nLayups = len(p.compositeLayups.keys())
-                        # calculate of the total relative thickness of plies add to one otherwise 
-                        #terminate the program
-                    for j in range(0,nPlies):
-                        plyThickness.append(p.compositeLayups[key].plies[j].thickness)
-                        region.append(p.compositeLayups[key].plies[j].region[0])
-                    if sum(plyThickness) != 1 and region != [region[0]] * nPlies:
-                        sys.exit('Defined relative thiknesses do not add up to one and/or regions defined for compositelayup are different')
                     plyRelThickness = 0  
                     # Three possible directions for the ply stack
                     # Vertex change depending on stack direction
