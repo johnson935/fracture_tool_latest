@@ -13,6 +13,7 @@ RsgLabel(p='TabItem_5', text='Before running the program make sure you have:', u
 RsgLabel(p='TabItem_5', text='- A part model and its mesh (Hex mesh only)', useBoldFont=False)
 RsgLabel(p='TabItem_5', text='- Composite definition and its datum axis', useBoldFont=False)
 RsgLabel(p='TabItem_5', text='- In the composite definition make sure the relative element thicknesses for the plies add to one', useBoldFont=False)
+RsgLabel(p='TabItem_5', text='- In the composite definition make sure only one region is defined for all plies', useBoldFont=False)
 RsgLabel(p='TabItem_5', text='-Tool assumes direction one of the composite layup definition is the firbe direction', useBoldFont=False)
 RsgLabel(p='TabItem_5', text='- In the stack direction definition, element direction 1 = x-axis, element direction 2 = y-axis, and element direction 3 = z-direction', useBoldFont=False)
 RsgLabel(p='TabItem_5', text='Step by step instructions:', useBoldFont=False)

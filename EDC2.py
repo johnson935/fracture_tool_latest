@@ -30,6 +30,7 @@ import time
 from collections import Counter
 import sys    
 def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
+    #get variables from user interface
     unit = kwargs.get('unit')
     mat = kwargs.get('mat')
     cusMat = kwargs.get('cusMat')
@@ -41,8 +42,12 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
     cusTau = kwargs.get('cusTau')
     selectAxis = kwargs.get('selectAxis')
     axisGlobal = kwargs.get('axisGlobal')
+    
+    #exception handling
+    #check if part exists
     if part == '':
         raise Exception('Part not defined please make a part before using software')
+    #check if input for number of fracture planes exist
     if N == None:
         raise Exception('Enter number of fracture planes')
     if g0 == None or g90 == None:
@@ -53,7 +58,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         raise Exception('Please define layup before using tool')
     # timing script
     t1 = time.time()
-    # creating plane
+    #intiallising variables
     area2 = {}
     U = {}
     F ={}
@@ -65,6 +70,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
     x = []
     y = []
     z = []
+    # getting nodes and elements from part
     nodeSet = p.nodes
     elementSet = p.elements
     if len(elementSet) == 0 or len(elementSet) == None:
@@ -79,7 +85,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             tau12 = 145000000
         elif mat == 'T300/913':
             G90 = 211
-            G0 = 133000
+            G0 = 91600
             sigma1 = 582000000
             sigma2 = 65500000
             tau12 = 67900000
@@ -91,8 +97,8 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             sigma2 = 34900000
             tau12 = 67900000
     if unit == 'millimeter':
-        G90 = G90/1000000
-        G0 = G0/1000000
+        G90 = G90*0.000001
+        G0 = G0*0.000001
         sigma1 = sigma1/1000000
         sigma2 = sigma2/1000000
         tau12 = tau12/1000000
@@ -102,8 +108,9 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         sigma1 = cusSigma
         sigma2 = cusSigma2
         tau12 = cusTau
-    
+    #
     if multiPlane == True and selectAxis == 'Use global axis':
+        #getting coordinates of the model
         for n in range(0,len(nodeSet)):
             x.append( nodeSet[n].coordinates[0])
             y.append(nodeSet[n].coordinates[1])
@@ -126,7 +133,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         elif axisGlobal == 'Z': 
             start = minZ
             end = maxZ
-        
+        #iterating through planes
         for z in np.arange(start,end,abs(start-end)/N):
             if axisGlobal == 'X':
                 s = np.array([z,0,0])
@@ -144,14 +151,14 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 r = np.array([1,0,z])
                 ax = 'z'
             lambRecord = []
-        
+        # create plane for visualisation in abaqus cae
             p.DatumPlaneByThreePoints(point1=s, 
                 point2=q, 
                 point3=r) 
             
             pq = q - s
             pr = r - s
-            
+            #equation of plane
             perp = np.cross(pq,pr)
             d = -np.dot(perp,-s)
             #select elements
@@ -160,9 +167,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             vertexplyi = np.zeros((12,3))
             vertexplyj = np.zeros((12,3))
             vertexsubply = np.zeros((8,3))
-            #finding area of intercepts in the general case of any plane interception on the element
+            #number of layups
             nLayups = len(p.compositeLayups.keys())
-        #finding area of intercepts in the general case of any plane interception on the element
+            
+            #iterate through layups
             for n in range(0,nLayups):
                 key = p.compositeLayups.keys()[n]
                 nPlies = len(p.compositeLayups[key].plies)
@@ -172,20 +180,23 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 stackAxis = p.compositeLayups[key].orientation.stackDirection
                 plyThickness = 0
                 region = []
+                #iterate through plies
                 for j in range(0,nPlies):
                     plyThickness += p.compositeLayups[key].plies[j].thickness
                     region.append(p.compositeLayups[key].plies[j].region[0])       
-                if int(plyThickness) != 1:
+                #check if relative thickness add to one
+                if 0.9 > int(plyThickness) > 1.1:
                     raise Exception('Defined relative thiknesses do not add up to one')
-
-        #        if e == 3:
+                    
                 connected = []
+                #iterate through elements in layup
                 for e in range(0,len(plyElements)):
                     connected = plyElements[e].connectivity
                     label = plyElements[e].label
                     area2[label] = []
-                        # sort node index to keep track of lines and vertex
+                # sort node index to keep track of lines and vertex
                     sort = np.sort(connected)
+                # workout length of sides in element
                     side1 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[1]].coordinates)
                     side2 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[2]].coordinates)
                     side3 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[4]].coordinates)
@@ -194,13 +205,12 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     size.append(np.linalg.norm(side3))
                     maxSize = max(size)
                     diag = math.sqrt(maxSize**2+maxSize**2)
-                    # calculate the elements near the plane taking account element mesh size
+                # check if elements are close to plane
                     if float(abs(np.dot(perp,np.array(nodeSet[sort[0]].coordinates)) - d)/(np.linalg.norm(perp))) <= float(math.sqrt(diag**2+maxSize**2)):
-                            # calculate of the total relative thickness of plies add to one otherwise 
-                            #terminate the program
+                            
                         plyRelThickness = 0  
-                        # Three possible directions for the ply stack
-                        # Vertex change depending on stack direction
+                    # Three possible directions for the ply stack
+                    # Vertex change depending on stack direction
                         if str(stackAxis) == 'STACK_1':
                             if np.array(nodeSet[sort[4]].coordinates)[0] < np.array(nodeSet[sort[0]].coordinates)[0]:
                                 vertexsubply[0,:] = np.array(nodeSet[sort[4]].coordinates)
@@ -265,14 +275,14 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 vertexsubply[1,:] = np.array(nodeSet[sort[1]].coordinates)
                                 vertexsubply[2,:] = np.array(nodeSet[sort[4]].coordinates)
                                 vertexsubply[3,:] = np.array(nodeSet[sort[5]].coordinates)
-                       # assign vertex to different variable for further calculation
+                    # assign vertex to different variable for further calculation
                         for i in range(0,4):     
                                 vertexply[i,:] = vertexsubply[i,:]
                         for j in range(0,nPlies):
                             plyRelThickness += p.compositeLayups[key].plies[j].thickness
                             lamb = []
                             
-                            #assign ply coordinates according to ply thickness using equation of a line 
+                    #assign ply coordinates according to ply thickness using equation of a line 
                             for i in range(0,4):
                                 vertexply[i+4,:] = vertexsubply[i,:] + plyRelThickness * (vertexsubply[i+4,:] - vertexsubply[i,:])
                                 vertexplyi[i,:] = vertexply[i,:]
@@ -302,8 +312,8 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             vertexplyi[11,:] = vertexply[6,:]
                             vertexplyj[11,:] = vertexply[7,:]
                             
-            #                # Algorithm for lines and finding lambda (gradient of intercept)
-            #                # refer to paper
+                # Algorithm for lines and finding lambda (gradient of intercept)
+                # refer to paper
                             
                             for i in range(0,len(vec)):
                                 vec[i,:] = vertexplyi[i,:] - vertexplyj[i,:]
@@ -315,10 +325,8 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                            
                             intercept = np.zeros((12,3))
                             count = Counter(lamb)
-            #                print(vec, vertexplyj)
-            #                print(vertexplyi)
                             
-                            # checking for every value of lambda if there is an intercept
+        # checking for every value of lambda if there is an intercept
                             for i in range(0,len(lamb)):
                                 if lamb[i] <=1 and lamb[i] >= 0:
                                     lambRecord.append(lamb[i])
@@ -326,18 +334,18 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 if 0 < lamb[i] < 1 and count[0] >= 4 or count[1] >= 4:
                                     continue
                                 elif lamb[i] < 1 and lamb[i] >= 0:
-                                    #if there is an intercept find the coordinates using parametric method
+                            #if there is an intercept find the coordinates using parametric method
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
-                                    #if lambda = 1 check if there are over lapping intersections
+                        #if lambda = 1 check if there are over lapping intersections
                                     if lamb[i] == 0:
                                         for j in range(0,len(intercept)):
                                             if j < k and np.array_equal(intercept[j,:], intercept[k,:]):
                                                 k -= 1
                                     k += 1
-                                # check if intersection is at the nodes and if the itersections lie
-                                # diagonally directly at the nodes so we have lambda = 1 and 0 
-                                # the same number of times
+                        # check if intersection is at the nodes and if the itersections lie
+                        # diagonally directly at the nodes so we have lambda = 1 and 0 
+                        # the same number of times
                                 elif lamb[i] == 1 and count[0] == count[1]:
                                     temp = (np.multiply(vec[i,:],lamb[i]) + vertexplyj[i,:])
                                     intercept[k,:] = temp
@@ -351,34 +359,33 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             norm = 0
                             angles = {}
         
-        #                        print(lamb)
-                            #for just three points of intersection find area of triangle
+                    #for just three points of intersection find area of triangle
                             if k == 3:
                                 pq = intercept[0,:] - intercept[1,:]
                                 pr = intercept[0,:] - intercept[2,:]
                                 cros = np.cross(pq,pr)
                                 norm += np.linalg.norm(cros)/2
                                 area2[label].append(norm)
-                            #things become harder with more than 3 points
+                        #things become harder with more than 3 points
                             elif k  >= 4:
-                                #define reference vector
+                            #define reference vector
                                 ref = intercept[0,:] - intercept[1,:]
-                                #set the reference angle of the reference vector to zero
+                            #set the reference angle of the reference vector to zero
                                 angles[1] = 0
                                 for i in range(2,k):
-                                    #find all other vectors with respect to the first point
-                                    #find their angles with respect to the reference angle
-                                    #then arrange from smallest to largest angle
+                                #find all other vectors with respect to the first point
+                                #find their angles with respect to the reference angle
+                                #then arrange from smallest to largest angle
                                     ref2 = intercept[0,:] - intercept[i,:]
                                     cros = np.cross(ref,ref2)
                                     refNorm = np.linalg.norm(cros)
                                     product = np.linalg.norm(ref)*np.linalg.norm(ref2)
                                     dot = np.dot(ref,ref2)
-                                    #if statement added as to test which side the point lies
-                                    #on reference vector. If the z componenet of the cross
-                                    #product of the reference vector and the new vector
-                                    #is negative then the point lies on one side, if positive
-                                    #point lies on other side
+                                #if statement added as to test which side the point lies
+                                #on reference vector. If the z componenet of the cross
+                                #product of the reference vector and the new vector
+                                #is negative then the point lies on one side, if positive
+                                #point lies on other side
                                     if cros[2] < 0:
                                         sin = -refNorm/product
                                     else:
@@ -417,27 +424,22 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             #in order to calcualte area of the new ply
                             for i in range(0,4):
                                 vertexply[i,:] = vertexply[i+4,:]
-                           #5.7 seconds when added to only consider elements near the plane and 28.4 seconds without modifycation 
+            # see if any area is equal to 0 and deleting them               
                 for label in area2.keys():
                     if area2[label] == [0]*nPlies or area2[label] == []:
                         del area2[label]
+            # if all intersections are 1 or 0 then plane lies on model boundary
             if lambRecord[0:] == [1] * len(lambRecord) or lambRecord[0:] == [0] * len(lambRecord):
                             area2 = {}
-            
-            #    print(vertexsubply)    
-    #        print(len(area2))
-    #        print('Area calculated from intersecting planes: {0}'.format(area2))
-                #print('Area calculated for special case where plane intersected nodes: {0}'.format(area))
-    
+
             fileNumber = 0
             if area2 != {}:
             # extracting material orientation
                 Name = 'csys-plane'
                 if Name in p.features.keys():
                     del p.features[Name]
-                #creating coordinate system for plane
-    #            p.DatumCsysByThreePoints( origin = pt2, name = Name,coordSysType = CARTESIAN,point1 = pt2+rotated, point2 = pt2 + perp)
-    #           #extracting coordinate axis
+            #creating coordinate system for plane
+            #extracting coordinate axis
 
             
                 Ry = np.zeros((3,3))
@@ -452,7 +454,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     #extract layup axis
                     plyaxis1 = p.datums[csys].axis1
                     nPlies = len(p.compositeLayups[key].plies)
-                    #for every ply
+                    #for every ply extract ply orientation 
                     for j in range(0,nPlies):
                         plyOrientation = p.compositeLayups[key].plies[j].orientation
                         plyAngle = p.compositeLayups[key].plies[j].orientationValue
@@ -474,16 +476,14 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 
                                 
                             if totalAngle != 0: 
-
+                                # direction 1 is the direction of fibre
                                 if refAxis == 'AXIS_2':
                                     Ry = np.array([[math.cos(totalAngle*math.pi/180),0,-math.sin(totalAngle*math.pi/180)],[0,1,0],[math.sin(totalAngle*math.pi/180),0,math.cos(45*math.pi/180)]])
                                     direction1 = np.dot(Ry,plyaxis1.direction)
-        #                            direction3 = np.dot(Ry,plyaxis3.direction)
-                               
+                              
                                 elif refAxis == 'AXIS_3':
                                     Rz = np.array([[math.cos(totalAngle*math.pi/180),-math.sin(totalAngle*math.pi/180),0],[-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180),0],[0,0,1]])
                                     direction1 = np.dot(Rz,plyaxis1.direction)
-        #                            direction2 = np.dot(Rz,plyaxis2.direction)
                         else:
                             #if there is a defines Csys for each ply then change the axis defined
                             plyaxis1 = p.datums[plyOrientation].axis1
@@ -529,30 +529,32 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             elif label in area2.keys():
                                 materialAngle[label] = [theta]
                                  #if only one ply is assigned to the element
-                
-            
-        #        print('Angle output for each element with respect to x, y and z axis of cut plane: {0}'.format(materialAngle))
-                
+        
                 #calculating toughness of composite in relation to fibre orientation
                 #Then storing the toughness of composite in a database if existing 
                 #orientation already exist
                 materialG = {}
                 sigmaFibre = []
                 fMatrix = []
-                sigmaMatrix = []
+                
                 totalU = 0
                 materialSigma1 = {}
                 totalF = 0
                 axis.append(z)
                 for element in area2.keys():
+                    sigmaMatrix = []
                     theta = materialAngle[element]
-                    #writing  and reading to database
-                    materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))
-#                    materialSigma1[element] = sigma1 * np.cos(np.multiply(theta,np.pi/180))
+                    # working out toughness and strength using models
+                    materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))       
                     sigmaFibre = np.divide(sigma1,np.power(np.cos(np.multiply(theta,np.pi/180)),2))
                     fMatrix = np.sqrt(np.power(np.divide(np.sin(np.multiply(theta,np.pi/180)), sigma2),2)
                     + np.power(np.divide(np.multiply(np.sin(np.multiply(theta,np.pi/180)),np.cos(np.multiply(theta,np.pi/180))),tau12),2))
-                    sigmaMatrix = np.power(fMatrix,-1)
+                    for strength in fMatrix:
+                        if strength != 0:
+                            sigmaMatrix.append(1/strength)
+                        else:
+                            sigmaMatrix.append(1000000000000)
+    
                     materialSigma1[element] = np.minimum(sigmaFibre,sigmaMatrix)
                     #calculate energy dissipation
                     totalU += np.dot(materialG[element],area2[element])
@@ -565,14 +567,22 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     U[totalU].append(p.features.keys()[-2])
                     F[totalU].append(totalF)
                     pos[totalU].append(z)
-                print('Total energy dissipated from failure: {0} J at {1}, = {2}, Critical force: {3} N'.format(format(float(totalU),'E'),ax,z,format(float(totalF),'E')))
+                    #output energy and force value to abaqus
+                print('At {0} = {1}'.format(ax,z))
+                print('Total energy dissipated is: {0} J'.format(format(float(totalU),'E')))
+                print('Force required: {0} N'.format(format(float(totalF),'E')))
+
                 plotU.append(totalU)
                 plotF.append(totalF)
         critU = min(U.keys())
         planes = U[critU]
         force = F[critU]
-        critPos = pos[critU]      
-        print('Critical energy is: {0} J. Critical Force: {1} N at the following planes: {2}, at {3} = {4}'.format(format(critU,'E'), format(force[0],'E'),planes,ax,critPos))
+        critPos = pos[critU]  
+        #output to message area in abaqus
+        print('From the estimated values')
+        print('Critical energy is: {0} J.'.format(format(format(critU,'E'))))
+        print('Force required: {0} N'.format(format(force[0],'E')))
+        print('At the following planes: {0}, at {1} = {2}'.format(planes,ax,critPos))
         t2 = time.time()
         print('Run time: {0}'.format(t2-t1))
         
@@ -598,7 +608,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
              axis2QuantityType=yQuantity, )
         #creating curve
         c2 = session.Curve(xyData=xy2)
-        #plotting curve
+        #plotting curve and changing axis label
         chart.setValues(curvesToPlot=(c2, ), )
         session.charts[chartName].axes1[0].axisData.setValues(useSystemTitle=False, 
         title='{0} coordinate'.format(ax))
@@ -606,13 +616,13 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         session.viewports['Viewport: 1'].setValues(displayedObject=xyp)
  
     
-    # force plot
+        # force plot
         fileNameF = 'Force Output{0}'.format(fileNumber)
         while fileName in outputFiles:
             fileNumber += 1
             fileNameF = 'Force Output{0}'.format(fileNumber)
         xyp = session.XYPlot(fileNameF)
-    
+        #creating plot
         chartName = xyp.charts.keys()[0]
         chart = xyp.charts[chartName]
         c = np.empty((len(axis),2))
@@ -622,14 +632,17 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             )
         c2 = session.Curve(xyData=xy2)
         chart.setValues(curvesToPlot=(c2, ), )
+        #changing axis label
         session.charts[chartName].axes2[0].axisData.setValues(useSystemTitle=False, 
         title='Force')
         session.charts[chartName].axes1[0].axisData.setValues(useSystemTitle=False, 
         title='{0} coordinate'.format(ax))
+        #chaning view
         session.viewports['Viewport: 1'].setValues(displayedObject=xyp)
         
         
-    #if ownaxis selected 
+    #if ownaxis selected define own axis, the code is the same as above
+    # Only difference is the plane definition
     if multiPlane == True and selectAxis == 'Use two points':
         axisPoints = kwargs.get('axisPoints')
         # timing script
@@ -640,16 +653,21 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         pos = {}
         axis = []
         plotU = []
+        # selecting points n viewport
         if axisPoints == 'Select points in viewport:':
             axisPointStart = kwargs.get('axisPointStart') 
             axisPointEnd = kwargs.get('axisPointEnd')
+            #exception handling
             if axisPointStart == None or axisPointEnd == None:
                 raise Exception('Points not selected')
             s = np.array(axisPointStart.coordinates)
             q = np.array(axisPointEnd.coordinates)
+        #define points manully 
         elif axisPoints == 'Define Points Manually':
             coordAxisStart = kwargs.get('coordAxisStart')
             coordAxisEnd = kwargs.get('coordAxisEnd')
+            
+            #exception handling
             if coordAxisStart == () or coordAxisEnd == ():
                 raise Exception('Points not defined')
             elif len(coordAxisStart[0]) != 3 or len(coordAxisEnd[0]) != 3:
@@ -689,7 +707,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 #ply stack direction
                 stackAxis = p.compositeLayups[key].orientation.stackDirection
                 plyThickness = []
-        #        if e == 3:
                 connected = []
                 region = []
                 nLayups = len(p.compositeLayups.keys())
@@ -698,7 +715,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 for j in range(0,nPlies):
                     plyThickness.append(p.compositeLayups[key].plies[j].thickness)
                     region.append(p.compositeLayups[key].plies[j].region[0])
-                if sum(plyThickness) != 1:
+                if 0.9 > sum(plyThickness) > 1.1:
                     sys.exit('Defined relative thiknesses do not add up to one')
 
                 for e in range(0,len(plyElements)):
@@ -821,8 +838,8 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             vertexplyi[11,:] = vertexply[6,:]
                             vertexplyj[11,:] = vertexply[7,:]
                             
-            #                # Algorithm for lines and finding lambda (gradient of intercept)
-            #                # refer to paper
+                           # Algorithm for lines and finding lambda (gradient of intercept)
+                           # refer to paper
                             
                             for i in range(0,len(vec)):
                                 vec[i,:] = vertexplyi[i,:] - vertexplyj[i,:]
@@ -834,9 +851,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                            
                             intercept = np.zeros((12,3))
                             count = Counter(lamb)
-            #                print(vec, vertexplyj)
-            #                print(vertexplyi)
-                            
+    
                             # checking for every value of lambda if there is an intercept
                             for i in range(0,len(lamb)):
                                 if lamb[i] <=1 and lamb[i] >= 0:
@@ -870,7 +885,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             norm = 0
                             angles = {}
         
-        #                        print(lamb)
                             #for just three points of intersection find area of triangle
                             if k == 3:
                                 pq = intercept[0,:] - intercept[1,:]
@@ -936,18 +950,12 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             #in order to calcualte area of the new ply
                             for i in range(0,4):
                                 vertexply[i,:] = vertexply[i+4,:]
-                           #5.7 seconds when added to only consider elements near the plane and 28.4 seconds without modifycation 
                 for label in area2.keys():
                     if area2[label] == [0]*nPlies or area2[label] == []:
                         del area2[label]
             if lambRecord[0:] == [1] * len(lambRecord) or lambRecord[0:] == [0] * len(lambRecord):
                             area2 = {}
             
-            #    print(vertexsubply)    
-    #        print(len(area2))
-    #        print('Area calculated from intersecting planes: {0}'.format(area2))
-                #print('Area calculated for special case where plane intersected nodes: {0}'.format(area))
-    
             fileNumber = 0
             if area2 != {}:
             # extracting material orientation
@@ -955,14 +963,13 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 if Name in p.features.keys():
                     del p.features[Name]
                 #creating coordinate system for plane
-    #            p.DatumCsysByThreePoints( origin = pt2, name = Name,coordSysType = CARTESIAN,point1 = pt2+rotated, point2 = pt2 + perp)
-    #           #extracting coordinate axis
+               #extracting coordinate axis
 
             
                 Ry = np.zeros((3,3))
                 Rz = np.zeros((3,3))
                 materialAngle = {}
-                #for each defined ply layup
+                #for each defined ply layup obtain axis, additional angle etc
                 for i in range(0,nLayups):
                     key = p.compositeLayups.keys()[i]
                     csys = p.compositeLayups[key].orientation.localCsys
@@ -971,7 +978,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     #extract layup axis
                     plyaxis1 = p.datums[csys].axis1
                     nPlies = len(p.compositeLayups[key].plies)
-                    #for every ply
+                    #for every ply obtain ply orientation and angle
                     for j in range(0,nPlies):
                         plyOrientation = p.compositeLayups[key].plies[j].orientation
                         plyAngle = p.compositeLayups[key].plies[j].orientationValue
@@ -997,12 +1004,11 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 if refAxis == 'AXIS_2':
                                     Ry = np.array([[math.cos(totalAngle*math.pi/180),0,-math.sin(totalAngle*math.pi/180)],[0,1,0],[math.sin(totalAngle*math.pi/180),0,math.cos(45*math.pi/180)]])
                                     direction1 = np.dot(Ry,plyaxis1.direction)
-        #                            direction3 = np.dot(Ry,plyaxis3.direction)
-                               
+                         
                                 elif refAxis == 'AXIS_3':
                                     Rz = np.array([[math.cos(totalAngle*math.pi/180),-math.sin(totalAngle*math.pi/180),0],[-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180),0],[0,0,1]])
                                     direction1 = np.dot(Rz,plyaxis1.direction)
-        #                            direction2 = np.dot(Rz,plyaxis2.direction)
+
                         else:
                             #if there is a defines Csys for each ply then change the axis defined
                             plyaxis1 = p.datums[plyOrientation].axis1
@@ -1025,8 +1031,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 
                             elif plyOrient == 'AXIS_3':
                                 Rz = np.array([[math.cos(totalAngle*math.pi/180),-math.sin(totalAngle*math.pi/180),0],[-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180),0],[0,0,1]])
-                                direction1 = np.dot(Rz,plyaxis1.direction)
-            #            
+                                direction1 = np.dot(Rz,plyaxis1.direction) 
                         #finding angle between direction of plane axis and fibre axis    
                         doty = np.dot(direction1,perp)
                         producty = np.linalg.norm(direction1)*np.linalg.norm(perp)
@@ -1049,22 +1054,29 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                                 materialAngle[label] = [theta]
                                  #if only one ply is assigned to the element
                                 
-                #calculating toughness of composite in relation to fibre orientation
+                #calculating toughness of composite for every element in the area dictionary 
+                #in relation to fibre orientation
                 #Then storing the toughness of composite in a database if existing 
                 #orientation already exist
                 materialG = {}
+                
                 totalU = 0
                 materialSigma1 = {}
                 totalF = 0
                 axis.append(z*axisLength)
                 for element in area2.keys():
+                    sigmaMatrix = []
                     theta = materialAngle[element]
                     #writing  and reading to database
                     materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))
                     sigmaFibre = np.divide(sigma1,np.power(np.cos(np.multiply(theta,np.pi/180)),2))
                     fMatrix = np.sqrt(np.power(np.divide(np.sin(np.multiply(theta,np.pi/180)), sigma2),2)
                     + np.power(np.divide(np.multiply(np.sin(np.multiply(theta,np.pi/180)),np.cos(np.multiply(theta,np.pi/180))),tau12),2))
-                    sigmaMatrix = np.power(fMatrix,-1)
+                    for strength in fMatrix:
+                        if strength != 0:
+                            sigmaMatrix.append(1/strength)
+                        else:
+                            sigmaMatrix.append(1000000000000)
                     materialSigma1[element] = np.minimum(sigmaFibre,sigmaMatrix)
                     #calculate energy dissipation
                     
@@ -1078,16 +1090,23 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     U[totalU].append(p.features.keys()[-2])
                     F[totalU].append(totalF)
                     pos[totalU].append(z)
-                print('Total energy dissipated from failure: {0} J, Critical force: {1} N at Point: {2}'.format(format(float(totalU),'E'),format(float(totalF),'E'),pt2))
+                print('At Point: {0}'.format(pt2))
+                print('Total energy dissipated is: {0} J'.format(format(float(totalU),'E')))
+                print('Force required: {0} N'.format(format(float(totalF),'E')))
                 plotU.append(totalU)
                 plotF.append(totalF)
         critU = min(U.keys())
         planes = U[critU]
         force = F[totalU]
-        print('Critical energy is: {0} J. Critical Force {1} N at the following planes: {2}, at Point {3}'.format(format(critU,'E'), format(force[0],'E'),planes,pt2))
+        #output to abaqus cae
+        print('The critical fracture plane/s: {0}'.format(planes))
+        print('At point: {0}'.format(pt2))
+        print('With critical fracture energy: {0} J'.format(format(critU,'E')))
+        print('Force required: {0} N'.format(format(force[0],'E')))
         t2 = time.time()
         print('Run time: {0}'.format(t2-t1))
         
+        #plots
         outputFiles = session.xyPlots.keys()
         fileName = 'Energy Output{0}'.format(fileNumber)
         while fileName in outputFiles:
@@ -1130,23 +1149,29 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         title='Distance along axis path')
         session.viewports['Viewport: 1'].setValues(displayedObject=xyp)
         
-        
+    # select potential fracture plane tab same code as above 
+    # but only runs for one plane
+    # and different inputs 
     if singlePlane == True:
         area2 = {}
         selectPsingle = kwargs.get('selectPsingle')
+        # select points in viewport
         if selectPsingle == 'Select points in viewport:':
             coord1 = kwargs.get('coord1')
             coord2 = kwargs.get('coord2')
             coord3 = kwargs.get('coord3')
+            #exception handling
             if coord1 == None or coord2 == None or coord3 == None:
                 raise Exception('Point not picked please pick points')
             s = np.array(coord1.coordinates)
             q = np.array(coord2.coordinates)
             r = np.array(coord3.coordinates)
+        #define points manully 
         elif selectPsingle == 'Define Points Manually:':
             enterCoord1 = kwargs.get('enterCoord1')
             enterCoord2 = kwargs.get('enterCoord2')
             enterCoord3 = kwargs.get('enterCoord3')
+            #exception handling
             if enterCoord1 == () or enterCoord2 == () or enterCoord3 == ():
                 raise Exception('Points not defined please define point')
             elif len(enterCoord1[0]) != 3 or len(enterCoord2[0]) != 3 or len(enterCoord3[0]) != 3:
@@ -1189,16 +1214,15 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             for j in range(0,nPlies):
                 plyThickness.append(p.compositeLayups[key].plies[j].thickness)
                 region.append(p.compositeLayups[key].plies[j].region[0])
-            if sum(plyThickness) != 1:
+            if 0.9 > sum(plyThickness) > 1.1:
                 raise Exception('Defined relative thiknesses do not add up to one')
 
-    #        if e == 3:
             connected = []
             for e in range(0,len(plyElements)):
                 connected = plyElements[e].connectivity
                 label = plyElements[e].label
                 area2[label] = []
-                    # sort node index to keep track of lines and vertex
+                # sort node index to keep track of lines and vertex
                 sort = np.sort(connected)
                 side1 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[1]].coordinates)
                 side2 = np.array(nodeSet[sort[0]].coordinates)-np.array(nodeSet[sort[2]].coordinates)
@@ -1314,8 +1338,8 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                         vertexplyi[11,:] = vertexply[6,:]
                         vertexplyj[11,:] = vertexply[7,:]
                         
-        #                # Algorithm for lines and finding lambda (gradient of intercept)
-        #                # refer to paper
+             # Algorithm for lines and finding lambda (gradient of intercept)
+              # refer to paper
                         
                         for i in range(0,len(vec)):
                             vec[i,:] = vertexplyi[i,:] - vertexplyj[i,:]
@@ -1327,8 +1351,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                        
                         intercept = np.zeros((12,3))
                         count = Counter(lamb)
-        #                print(vec, vertexplyj)
-        #                print(vertexplyi)
+
                         
                         # checking for every value of lambda if there is an intercept
                         for i in range(0,len(lamb)):
@@ -1362,8 +1385,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 #find the areas by sorting the coordinates of intersections
                         norm = 0
                         angles = {}
-    
-    #                        print(lamb)
+
                         #for just three points of intersection find area of triangle
                         if k == 3:
                             pq = intercept[0,:] - intercept[1,:]
@@ -1429,17 +1451,12 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                         #in order to calcualte area of the new ply
                         for i in range(0,4):
                             vertexply[i,:] = vertexply[i+4,:]
-                       #5.7 seconds when added to only consider elements near the plane and 28.4 seconds without modifycation 
+    
             for label in area2.keys():
                 if area2[label] == [0]*nPlies or area2[label] == []:
                     del area2[label]
         if lambRecord[0:] == [1] * len(lambRecord) or lambRecord[0:] == [0] * len(lambRecord):
                         area2 = {}
-        
-        #    print(vertexsubply)    
-#        print(len(area2))
-#        print('Area calculated from intersecting planes: {0}'.format(area2))
-            #print('Area calculated for special case where plane intersected nodes: {0}'.format(area))
 
         fileNumber = 0
         if area2 != {}:
@@ -1448,15 +1465,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             if Name in p.features.keys():
                 del p.features[Name]
             #creating coordinate system for plane
-#            p.DatumCsysByThreePoints( origin = pt2, name = Name,coordSysType = CARTESIAN,point1 = pt2+rotated, point2 = pt2 + perp)
-#           #extracting coordinate axis
-#            planeAxis1 = p.datums[p.features[Name].id].axis1
-#            planeAxis2 = p.datums[p.features[Name].id].axis2
-#            planeAxis3 = p.datums[p.features[Name].id].axis3
-#            
-#            
-        
-    #        Rx = np.zeros((3,3))
+
             Ry = np.zeros((3,3))
             Rz = np.zeros((3,3))
             materialAngle = {}
@@ -1467,11 +1476,11 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 refAxis = str(p.compositeLayups[key].orientation.axis)
                 addAngle = p.compositeLayups[key].orientation.angle
                 #extract layup axis
+                #normal axis to plane
                 plyaxis1 = p.datums[csys].axis1
-    #            plyaxis2 = p.datums[sys].axis2
-    #            plyaxis3 = p.datums[sys].axis3
+
                 nPlies = len(p.compositeLayups[key].plies)
-                #for every ply
+                #for every ply obtain ply orientaion and angle
                 for j in range(0,nPlies):
                     plyOrientation = p.compositeLayups[key].plies[j].orientation
                     plyAngle = p.compositeLayups[key].plies[j].orientationValue
@@ -1480,10 +1489,10 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                     
                     #if no material orientation is defined for each individual py then 
                     #orientatio will be that of the layup
+                    #direction1 = direction of fibre
                     if plyOrientation == None:
                         direction1 = plyaxis1.direction
-    #                    direction2 = plyaxis2.direction
-    #                    direction3 = plyaxis3.direction
+
                         totalAngle = addAngle + plyAngle
                         
                         if plyOrientType == 'ANGLE_45':
@@ -1495,31 +1504,20 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             
                             
                         if totalAngle != 0: 
-    #                        if refAxis == 'AXIS_1':
-    #                    #rotation wrt x axis
-    #                            Rx = np.array([[1,0,0],[0,math.cos(totalAngle*math.pi/180),math.sin(totalAngle*math.pi/180)],[0,-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180)]])
-    #                            direction2 = np.dot(Rx,plyaxis2.direction)
-    #                            direction3 = np.dot(Rx,plyaxis3.direction)
-                               
+        
                             if refAxis == 'AXIS_2':
                                 Ry = np.array([[math.cos(totalAngle*math.pi/180),0,-math.sin(totalAngle*math.pi/180)],[0,1,0],[math.sin(totalAngle*math.pi/180),0,math.cos(45*math.pi/180)]])
                                 direction1 = np.dot(Ry,plyaxis1.direction)
-    #                            direction3 = np.dot(Ry,plyaxis3.direction)
                            
                             elif refAxis == 'AXIS_3':
                                 Rz = np.array([[math.cos(totalAngle*math.pi/180),-math.sin(totalAngle*math.pi/180),0],[-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180),0],[0,0,1]])
                                 direction1 = np.dot(Rz,plyaxis1.direction)
-    #                            direction2 = np.dot(Rz,plyaxis2.direction)
                     else:
                         #if there is a defines Csys for each ply then change the axis defined
                         plyaxis1 = p.datums[plyOrientation].axis1
-    #                    plyaxis2 = p.datums[plyOrientation].axis2
-    #                    plyaxis3 = p.datums[plyOrientation].axis3
-                    
+     
                         direction1 = plyaxis1.direction
-    #                    direction2 = plyaxis2.direction
-    #                    direction3 = plyaxis3.direction
-        #               
+             
                         totalAngle = plyAngle
                         if plyOrientType == 'ANGLE_45':
                             totalAngle = 45
@@ -1527,13 +1525,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             totalAngle = 90
                         elif plyOrientType == 'ANGLLE_NEG45':
                             totalAngle = -45
-                            
-    #                    if plyOrient == 'AXIS_1':
-    #                    #rotation wrt x axis
-    #                        Rx = np.array([[1,0,0],[0,math.cos(totalAngle*math.pi/180),math.sin(totalAngle*math.pi/180)],[0,-math.sin(totalAngle*math.pi/180),math.cos(totalAngle*math.pi/180)]])
-    #                        direction2 = np.dot(Rx,plyaxis2.direction)
-    #                        direction3 = np.dot(Rx,plyaxis3.direction)
-                           
+                                              
                         elif plyOrient == 'AXIS_2':
                             Ry = np.array([[math.cos(totalAngle*math.pi/180),0,-math.sin(totalAngle*math.pi/180)],[0,1,0],[math.sin(totalAngle*math.pi/180),0,math.cos(45*math.pi/180)]])
                             direction1 = np.dot(Ry,plyaxis1.direction)
@@ -1547,10 +1539,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
         #            
                     #finding angle between direction of plane axis and fibre axis    
                     
-    #                dotx = np.dot(direction1,planeAxis1.direction)
                     doty = np.dot(direction1,perp)
-    #                dotz = np.dot(direction1,planeAxis3.direction)
-    #                productx = np.linalg.norm(direction1)*np.linalg.norm(planeAxis1.direction)
                     producty = np.linalg.norm(direction1)*np.linalg.norm(perp)
     
     
@@ -1574,7 +1563,6 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                             materialAngle[label] = [theta]
                              #if only one ply is assigned to the element
                                 #if only one ply is assigned to the element
-            
  
             #calculating toughness of composite in relation to fibre orientation
             #Then storing the toughness of composite in a database if existing 
@@ -1584,6 +1572,7 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
             totalF = 0
             materialSigma1 = {}
             for element in area2.keys():
+                sigmaMatrix = []
                 theta = materialAngle[element]
                 #writing  and reading to database
                 materialG[element] = G0 * np.cos(np.multiply(theta,np.pi/180)) + G90 * np.sin(np.multiply(theta,np.pi/180))
@@ -1591,15 +1580,26 @@ def fEDC(part, model, singlePlane, multiPlane, *args, **kwargs):
                 sigmaFibre = np.divide(sigma1,np.power(np.cos(np.multiply(theta,np.pi/180)),2))
                 fMatrix = np.sqrt(np.power(np.divide(np.sin(np.multiply(theta,np.pi/180)), sigma2),2)
                 + np.power(np.divide(np.multiply(np.sin(np.multiply(theta,np.pi/180)),np.cos(np.multiply(theta,np.pi/180))),tau12),2))
-                sigmaMatrix = np.power(fMatrix,-1)
+                for strength in fMatrix:
+                    if strength != 0:
+                        sigmaMatrix.append(1/strength)
+                    else:
+                        sigmaMatrix.append(1000000000000)
                 materialSigma1[element] = np.minimum(sigmaFibre,sigmaMatrix)
                 #calculate energy dissipation
                 
                 totalU += np.dot(materialG[element],area2[element])
                 totalF += np.dot(materialSigma1[element],area2[element])    
-               
-            print('Total energy dissipated from failure: {0} J. Critical Force: {1} N for plane selected at: {2}, {3}, {4}'.format(format(float(totalU),'E'),format(float(totalF),'E'), s,q,r))
+           #output to abaqus
+            print('The following estimates were calculated')
+            if unit == 'millimeter':
+                print('Total energy dissipated from failure: {0} J.'.format(totalU))
+            else:
+                print('Total energy dissipated from failure: {0} J.'.format(format(float(totalU),'E')))
+            print('Force required: {0} N'.format(format(float(totalF),'E'))) 
+            print('The selected fracture plane has coordinates {0},{1},{2}'.format(s,q,r))
             t2 = time.time()
             print('Run time: {0}'.format(t2-t1))
+    # check if the tab check boxes are ticked
     if multiPlane == False and singlePlane == False:
         raise Exception('No checkboxes were ticked please tick at least one checkbox')
