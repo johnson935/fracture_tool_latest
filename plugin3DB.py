@@ -19,6 +19,7 @@ RsgLabel(p='TabItem_5', text='- In the stack direction definition, element direc
 RsgLabel(p='TabItem_5', text='Step by step instructions:', useBoldFont=False)
 RsgLabel(p='TabItem_5', text='For step by step instructions please refer to the user guide provided with the plugin', useBoldFont=False)
 RsgLabel(p='TabItem_5', text='or use the link below for a video demonstration of the tool:', useBoldFont=False)
+RsgLabel(p='TabItem_5', text='https://youtu.be/zVOHwa3-SCU', useBoldFont=False)
 RsgTabItem(name='TabItem_3', p='TabBook_1', text='Part Selection')
 RsgComboBox(name='ComboBox_2', p='TabItem_3', text='Part:', keyword='part', default='', comboType='MDB', repository='parts', rootText='Model:', rootKeyword='model', layout='HORIZONTAL')
 RsgTabItem(name='TabItem_4', p='TabBook_1', text='Material Properties')
